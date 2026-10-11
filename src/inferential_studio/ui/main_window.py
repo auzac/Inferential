@@ -139,7 +139,7 @@ class MainWindow(QMainWindow):
             "&Import Data…",
             lambda: self.import_dialog(),
             QKeySequence("Ctrl+I"),
-            "Import process (historian) or lab data from CSV or Excel",
+            "Import data from CSV or Excel — process, lab, or both in one file",
         )
         self.act_export = action(
             "&Export…",
@@ -250,7 +250,7 @@ class MainWindow(QMainWindow):
                 page: StagePage = ImportPage(stage, self.session)
                 page.generate_example_requested.connect(self._generate_example_dialog)
                 page.open_project_requested.connect(self._open_dialog)
-                page.import_requested.connect(lambda kind: self.import_dialog(kind))
+                page.import_requested.connect(self.import_dialog)
                 page.remove_requested.connect(self._remove_source)
             elif stage.key == "initial_eda":
                 page = EdaPage(stage, self.session, self.tasks)
@@ -506,35 +506,33 @@ class MainWindow(QMainWindow):
             if answer == QMessageBox.StandardButton.Yes:
                 self.load_data(verify_checksum=False, only=changed)
 
-    def import_dialog(
-        self, kind: SourceKind | None = None, initial: ImportPlan | None = None
-    ) -> None:
-        kind = kind or (initial.source.kind if initial else None)
+    def import_dialog(self, initial: ImportPlan | None = None) -> None:
         source_id = (
             initial.source.source_id
             if initial
-            else self.session.new_source_id(kind or SourceKind.PROCESS)
+            else self.session.new_source_id(SourceKind.PROCESS)  # provisional; kind is resolved later
         )
         wizard = ImportWizard(
             self.session.project,
             self.session.project.display_timezone,
-            kind=kind,
             source_id=source_id,
             initial=initial,
             parent=self,
         )
         if wizard.exec():
-            plan = wizard.plan()
-            if plan.source.source_id in {s.source_id for s in self.session.project.sources}:
-                plan = ImportPlan(
-                    replace(plan.source, source_id=self.session.new_source_id(plan.source.kind)),
-                    plan.variables,
-                )
-                plan = ImportPlan(
-                    plan.source,
-                    [replace(v, source_id=plan.source.source_id) for v in plan.variables],
-                )
-            self.run_import(plan)
+            self.run_import(self._fit_plan_id(wizard.plan()))
+
+    def _fit_plan_id(self, plan: ImportPlan) -> ImportPlan:
+        """The wizard proposed an id before the kind was known: make it kind-consistent and free."""
+        sid = plan.source.source_id
+        used = {s.source_id for s in self.session.project.sources}
+        if sid in used or sid.split("_", 1)[0] != plan.source.kind.value:
+            new_id = self.session.new_source_id(plan.source.kind)
+            return ImportPlan(
+                replace(plan.source, source_id=new_id),
+                [replace(v, source_id=new_id) for v in plan.variables],
+            )
+        return plan
 
     def run_import(self, plan: ImportPlan) -> None:
         self.tasks.submit(

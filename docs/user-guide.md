@@ -1,6 +1,6 @@
 # User guide
 
-This guide covers **v0.5.1**: all nine stages, from data import to the model card. The **Help**
+This guide covers **v0.5.2**: all nine stages, from data import to the model card. The **Help**
 panel on the right gives a short guide to the stage on screen; **F1** opens this guide inside
 the application (offline).
 
@@ -24,11 +24,12 @@ Opening a project reads its data files in the background; the status bar shows p
 
 ## 2. Import your own data
 
-**File → Import Data…** (Ctrl+I) or the buttons on the Data Import page start a five-step wizard:
+**File → Import Data…** (Ctrl+I) or the **Import data…** button on the Data Import page start a
+five-step wizard. One file can hold process tags, lab/analyzer results, or both — the wizard
+works out the source type from what you choose:
 
-1. **File** — process data (historian export: one timestamp column, many tags) or lab/analyzer
-   results (sparse samples of the target). Drag a file onto the window or browse. CSV, TSV, TXT
-   and Excel `.xlsx` are supported. The file is never modified.
+1. **File** — drag a file onto the window or browse. CSV, TSV, TXT and Excel `.xlsx` are
+   supported. The file is never modified.
 2. **Read options** — delimiter, encoding and decimal separator are proposed from the file;
    check the preview and change them if columns look wrong. Set the line/row holding the
    column names if the export has extra lines at the top.
@@ -37,11 +38,17 @@ Opening a project reads its data files in the background; the status bar shows p
    the file, the local interpretation, the stored UTC time and the project display time.
    - If dates could be read either day-first or month-first (for example only days 1–12
      appear), the wizard says so and **Next stays disabled until you choose**. It never guesses.
-   - For lab data you can also choose the **result available** time (when the lab reported the
-     value) and a **sample ID** column. Models are aligned to the sample time.
+   - The optional **Lab / analyzer results** group holds the **result available** time (when the
+     lab reported the value) and a **sample ID** column. Setting either marks the file as lab
+     data; models are aligned to the sample time.
 4. **Columns** — choose columns to import, their variable names, role (candidate predictor,
    target, not used) and units. Units are never guessed; type them if you know them. A column
    with little numeric content in the preview is shown in red.
+   - One CSV with the target and the predictors is the common case: mark the lab column as
+     target and the tags as candidate predictors — the source is process data, and the model
+     aligns the target to the process timeline.
+   - A file with only the target (no predictors, or a result time / sample ID set) is lab /
+     analyzer data. Predictor columns cannot live in a lab source.
 5. **Duplicates** — what to do with rows sharing a timestamp. For process data the default
    stops and reports them so you can decide; lab replicates are kept separately by default.
 

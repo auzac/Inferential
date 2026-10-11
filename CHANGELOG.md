@@ -3,6 +3,18 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## v0.5.2 — Single data import flow (2026-10-12)
+
+### Changed
+- Data Import: one **Import data…** button replaces the separate process and lab buttons. The
+  wizard no longer asks for the source type on its first page — it is resolved from your choices:
+  a result-available time or sample ID, or a target with no predictors, means lab / analyzer
+  data; anything else (including one CSV holding both the target and predictors) is process data.
+- The result-available time and sample-ID fields always appear on the Timestamps page, grouped as
+  optional lab / analyzer extras; picking a column there marks the source as lab data.
+- The wizard blocks lab sources with predictor columns, since predictors must come from process
+  data.
+
 ## v0.5.1 — Interface refresh and message panel (2026-10-12)
 
 ### Added

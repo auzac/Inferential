@@ -11,8 +11,10 @@ from inferential_studio.infrastructure.paths import resource_path
 STAGE_HELP: dict[str, str] = {
     "import": """
 <h3>Data Import</h3>
-<p>Bring in a <b>process</b> file (historian export: one timestamp column, many tags) and a
-<b>lab</b> file (sample time, optional result time and sample id, the measured value).</p>
+<p>Use <b>Import data…</b> for any file: a process file (historian export: one timestamp column,
+many tags), a lab file (sample time, optional result time and sample id, the measured value), or
+one CSV holding <b>both the target and the predictors</b>. The wizard recognises the type from
+your choices.</p>
 <ul><li>The wizard detects the timestamp format; ambiguous dates (e.g. 03/04) must be confirmed.</li>
 <li>Set the timezone the file was written in. Everything is stored in UTC.</li>
 <li>Check the validation report for gaps, duplicates and text cells.</li></ul>

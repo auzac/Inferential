@@ -15,7 +15,6 @@ import pandas as pd
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QGuiApplication
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -25,7 +24,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QRadioButton,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -81,13 +79,33 @@ class ImportPlan:
     variables: list[VariableMeta] = field(default_factory=list)
 
 
+def resolve_kind(
+    result_spec: TimestampSpec | None,
+    sample_id_column: str | None,
+    variables: list[VariableMeta],
+) -> SourceKind:
+    """The source kind follows from the wizard's choices, not a type button.
+
+    A result-available time or a sample ID always means lab / analyzer data. Without those
+    markers, a target with no predictors is a sparse lab file; anything else — including the
+    common case of one CSV holding both the target and the predictors — is process data.
+    """
+    if result_spec is not None or sample_id_column is not None:
+        return SourceKind.LAB
+    roles = {v.role for v in variables}
+    if VariableRole.TARGET in roles and VariableRole.PREDICTOR not in roles:
+        return SourceKind.LAB
+    return SourceKind.PROCESS
+
+
 class _State:
     """Values shared between wizard pages."""
 
     def __init__(self, project: Project, default_timezone: str) -> None:
         self.project = project
         self.default_timezone = default_timezone
-        self.kind = SourceKind.PROCESS
+        self.kind = SourceKind.PROCESS  # resolved on the finish page / in plan()
+        self.columns: ColumnsPage | None = None  # the wizard sets this; FinishPage reads it
         self.path: Path | None = None
         self.opts = ReadOptions()
         self.names: list[str] = []
@@ -109,14 +127,11 @@ class FilePage(QWizardPage):
         self.setSubTitle(
             "CSV/TSV text files or Excel workbooks (.xlsx). The file is never modified."
         )
-        self.process_radio = QRadioButton(
-            "Process data — historian export, one timestamp column and many tags"
+        self.hint = QLabel(
+            "One file can hold the target, the predictors, or both — process and lab / analyzer "
+            "data are recognised from your choices on the next pages."
         )
-        self.lab_radio = QRadioButton("Lab / analyzer results — sparse samples of the target")
-        self.process_radio.setChecked(True)
-        group = QButtonGroup(self)
-        group.addButton(self.process_radio)
-        group.addButton(self.lab_radio)
+        self.hint.setWordWrap(True)
         self.path_edit = QLineEdit()
         self.path_edit.setPlaceholderText("Browse or drag a file onto this window")
         self.path_edit.textChanged.connect(self.completeChanged)
@@ -128,8 +143,7 @@ class FilePage(QWizardPage):
         row.addWidget(self.path_edit, 1)
         row.addWidget(browse)
         layout = QVBoxLayout(self)
-        layout.addWidget(self.process_radio)
-        layout.addWidget(self.lab_radio)
+        layout.addWidget(self.hint)
         layout.addSpacing(12)
         layout.addLayout(row)
         layout.addWidget(self.message)
@@ -163,7 +177,6 @@ class FilePage(QWizardPage):
         if self.s.path != path:  # keep options when coming back to the same file
             self.s.opts = opts
         self.s.path = path
-        self.s.kind = SourceKind.LAB if self.lab_radio.isChecked() else SourceKind.PROCESS
         if path.stat().st_size > LARGE_FILE_BYTES:
             self.message.setText(
                 "This is a very large file; the full import may take several minutes."
@@ -424,7 +437,7 @@ class TimePage(QWizardPage):
             "All data is stored in UTC."
         )
         self.time = TimestampChooser("Timestamp", state)
-        self.result = TimestampChooser("Result available time (optional)", state, optional=True)
+        self.result = TimestampChooser("Result available time", state, optional=True)
         self.result.setToolTip(
             "When the lab result was reported. Recorded for audit; models align to the sample time."
         )
@@ -437,15 +450,16 @@ class TimePage(QWizardPage):
 
         tz_form = QFormLayout()
         tz_form.addRow("Source timezone:", self.tz)
-        self.lab_box = QGroupBox("Lab sample identification")
-        lab_form = QFormLayout(self.lab_box)
+        self.lab_box = QGroupBox("Lab / analyzer results (optional)")
+        self.lab_box.setToolTip("Setting these marks this source as lab data.")
+        lab_layout = QVBoxLayout(self.lab_box)
+        lab_layout.addWidget(self.result)
+        lab_form = QFormLayout()
         lab_form.addRow("Sample ID column (optional):", self.sample_id)
+        lab_layout.addLayout(lab_form)
 
-        top = QHBoxLayout()
-        top.addWidget(self.time, 1)
-        top.addWidget(self.result, 1)
         layout = QVBoxLayout(self)
-        layout.addLayout(top)
+        layout.addWidget(self.time)
         layout.addWidget(self.lab_box)
         layout.addLayout(tz_form)
         layout.addWidget(self.status)
@@ -456,10 +470,6 @@ class TimePage(QWizardPage):
         self.tz.currentTextChanged.connect(self._update)
 
     def initializePage(self) -> None:  # noqa: N802
-        is_lab = self.s.kind is SourceKind.LAB
-        self.time.setTitle("Sample (collection) time" if is_lab else "Timestamp")
-        self.result.setVisible(is_lab)
-        self.lab_box.setVisible(is_lab)
         names = self.s.names
         guess = next(
             (n for n in names if any(k in n.lower() for k in ("time", "date", "zeit"))), names[0]
@@ -469,15 +479,14 @@ class TimePage(QWizardPage):
         if self.s.time_spec:
             self.time.select_format(self.s.time_spec.format, self.s.time_spec.kind)
             self.tz.setCurrentText(self.s.time_spec.source_timezone)
-        if is_lab:
-            self.result.populate(names, self.s.result_spec.column if self.s.result_spec else None)
-            if self.s.result_spec:
-                self.result.select_format(self.s.result_spec.format, self.s.result_spec.kind)
-            self.sample_id.clear()
-            self.sample_id.addItem(NONE_ITEM)
-            self.sample_id.addItems(names)
-            if self.s.sample_id_column:
-                self.sample_id.setCurrentText(self.s.sample_id_column)
+        self.result.populate(names, self.s.result_spec.column if self.s.result_spec else None)
+        if self.s.result_spec:
+            self.result.select_format(self.s.result_spec.format, self.s.result_spec.kind)
+        self.sample_id.clear()
+        self.sample_id.addItem(NONE_ITEM)
+        self.sample_id.addItems(names)
+        if self.s.sample_id_column:
+            self.sample_id.setCurrentText(self.s.sample_id_column)
         self._update()
 
     def _update(self) -> None:
@@ -528,16 +537,14 @@ class TimePage(QWizardPage):
             or self.time.spec(self.tz.timezone()) is None
         ):
             return False
-        return self.result.is_complete() if self.s.kind is SourceKind.LAB else True
+        return self.result.is_complete()
 
     def validatePage(self) -> bool:  # noqa: N802
         tz = self.tz.timezone()
         self.s.time_spec = self.time.spec(tz)
-        self.s.result_spec = self.result.spec(tz) if self.s.kind is SourceKind.LAB else None
+        self.s.result_spec = self.result.spec(tz)
         sid = self.sample_id.currentText()
-        self.s.sample_id_column = (
-            sid if self.s.kind is SourceKind.LAB and sid and sid != NONE_ITEM else None
-        )
+        self.s.sample_id_column = sid if sid and sid != NONE_ITEM else None
         if self.s.result_spec and self.s.result_spec.column == self.s.time_spec.column:
             self.status.setText(
                 "<span style='color:#b00020'>Sample and result time must be different columns.</span>"
@@ -602,6 +609,7 @@ class ColumnsPage(QWizardPage):
         columns = [n for n in s.names if n not in used]
         existing = {v.name for v in s.project.variables}
         has_target = s.project.target is not None
+        lab_markers = s.result_spec is not None or s.sample_id_column is not None
         self.table.setRowCount(len(columns))
         for row, name in enumerate(columns):
             prev = self.previous.get(name)
@@ -616,21 +624,20 @@ class ColumnsPage(QWizardPage):
             col_item = QTableWidgetItem(name)
             col_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.table.setItem(row, 1, col_item)
-            var_name = (
-                prev.name
-                if prev
-                else (name if name not in existing else f"{name} ({s.kind.value})")
-            )
+            if prev:
+                var_name = prev.name
+            elif name in existing:
+                var_name = f"{name} ({'lab' if lab_markers else 'process'})"
+            else:
+                var_name = name
             self.table.setItem(row, 2, QTableWidgetItem(var_name))
             role = QComboBox()
             for r, label in ROLE_LABELS.items():
                 role.addItem(label, r)
             if prev:
                 default = prev.role
-            elif s.kind is SourceKind.LAB:
-                default = (
-                    VariableRole.TARGET if (row == 0 and not has_target) else VariableRole.UNUSED
-                )
+            elif lab_markers and not has_target:
+                default = VariableRole.TARGET if row == 0 else VariableRole.UNUSED
             else:
                 default = VariableRole.PREDICTOR
             role.setCurrentIndex(role.findData(default))
@@ -710,18 +717,43 @@ class FinishPage(QWizardPage):
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         self.summary.setTextFormat(Qt.TextFormat.RichText)
+        self.error = QLabel()
+        self.error.setWordWrap(True)
+        self.error.setTextFormat(Qt.TextFormat.RichText)
         form = QFormLayout()
         form.addRow("If several rows share a timestamp:", self.policy)
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addSpacing(10)
         layout.addWidget(self.summary)
+        layout.addWidget(self.error)
         layout.addStretch(1)
         self.setFinalPage(True)
 
+    def _resolved(self) -> tuple[SourceKind, list[VariableMeta]]:
+        variables = self.s.columns.variables("_") if self.s.columns else []
+        return resolve_kind(self.s.result_spec, self.s.sample_id_column, variables), variables
+
+    def _kind_problem(self) -> str:
+        kind, variables = self._resolved()
+        if kind is SourceKind.LAB and any(v.role is VariableRole.PREDICTOR for v in variables):
+            return (
+                "This import resolves to lab / analyzer data, which holds only the target. "
+                "Predictor columns must come from process data — mark them 'Not used' "
+                "or clear the result time / sample ID on the Timestamps page."
+            )
+        return ""
+
+    def isComplete(self) -> bool:  # noqa: N802
+        problem = self._kind_problem()
+        self.error.setText(f"<span style='color:#b00020'>{problem}</span>" if problem else "")
+        return not problem
+
     def initializePage(self) -> None:  # noqa: N802
+        kind, _ = self._resolved()
+        self.s.kind = kind
         self.policy.clear()
-        if self.s.kind is SourceKind.LAB:
+        if kind is SourceKind.LAB:
             options = [
                 (DuplicatePolicy.KEEP_ALL, "Keep all rows as separate samples (replicates)"),
                 (DuplicatePolicy.KEEP_FIRST, "Keep the first row only"),
@@ -738,12 +770,13 @@ class FinishPage(QWizardPage):
         ts = self.s.time_spec
         self.summary.setText(
             f"<b>File:</b> {self.s.path}<br>"
-            f"<b>Type:</b> {'Lab / analyzer results' if self.s.kind is SourceKind.LAB else 'Process data'}<br>"
+            f"<b>Type:</b> {'Lab / analyzer results' if kind is SourceKind.LAB else 'Process data'}<br>"
             f"<b>Timestamp:</b> column '{ts.column}', {ts.kind.value}"
             f"{', format ' + ts.format if ts.format else ''}, source timezone {ts.source_timezone}<br>"
             "<br>The file is read in the background after you click Finish. A validation report "
             "(invalid times, gaps, non-numeric cells) is shown on the Data Import page."
         )
+        self.completeChanged.emit()  # refresh Finish after Back/re-entry with new roles
 
     @property
     def duplicate_policy(self) -> DuplicatePolicy:
@@ -759,7 +792,6 @@ class ImportWizard(QWizard):
         project: Project,
         default_timezone: str,
         *,
-        kind: SourceKind | None = None,
         source_id: str,
         initial: ImportPlan | None = None,
         parent: QWidget | None = None,
@@ -778,6 +810,7 @@ class ImportWizard(QWizard):
         self.time_page = TimePage(self.state)
         self.columns_page = ColumnsPage(self.state)
         self.finish_page = FinishPage(self.state)
+        self.state.columns = self.columns_page
         for page in (
             self.file_page,
             self.read_page,
@@ -787,15 +820,11 @@ class ImportWizard(QWizard):
         ):
             self.addPage(page)
 
-        if kind is SourceKind.LAB:
-            self.file_page.lab_radio.setChecked(True)
         if initial is not None:
             self._prefill(initial)
 
     def _prefill(self, plan: ImportPlan) -> None:
         src = plan.source
-        self.file_page.lab_radio.setChecked(src.kind is SourceKind.LAB)
-        self.file_page.process_radio.setChecked(src.kind is SourceKind.PROCESS)
         self.file_page.path_edit.setText(src.path)
         self.state.path = Path(src.path)
         self.state.opts = ReadOptions.from_source(src)
@@ -815,6 +844,8 @@ class ImportWizard(QWizard):
 
     def plan(self) -> ImportPlan:
         s = self.state
+        variables = self.columns_page.variables(self.source_id)
+        s.kind = resolve_kind(s.result_spec, s.sample_id_column, variables)
         source = DataSource(
             source_id=self.source_id,
             kind=s.kind,
@@ -829,7 +860,7 @@ class ImportWizard(QWizard):
             duplicate_policy=self.finish_page.duplicate_policy,
             sample_id_column=s.sample_id_column,
         )
-        return ImportPlan(source=source, variables=self.columns_page.variables(self.source_id))
+        return ImportPlan(source=source, variables=variables)
 
 
 __all__ = ["ImportPlan", "ImportWizard"]

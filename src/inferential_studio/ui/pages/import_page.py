@@ -38,7 +38,7 @@ SEVERITY_STYLE = {
 
 
 class ImportPage(StagePage):
-    import_requested = Signal(object)  # SourceKind
+    import_requested = Signal()
     remove_requested = Signal(str)  # source id
     generate_example_requested = Signal()
     open_project_requested = Signal()
@@ -50,17 +50,19 @@ class ImportPage(StagePage):
         self._session = session
 
         buttons = QHBoxLayout()
-        self.import_process = QPushButton("Import process data…")
-        mark_primary(self.import_process)
-        self.import_process.clicked.connect(lambda: self.import_requested.emit(SourceKind.PROCESS))
-        self.import_lab = QPushButton("Import lab / analyzer data…")
-        self.import_lab.clicked.connect(lambda: self.import_requested.emit(SourceKind.LAB))
+        self.import_button = QPushButton("Import data…")
+        mark_primary(self.import_button)
+        self.import_button.setToolTip(
+            "Import data from CSV or Excel — process tags, lab / analyzer results, or both in "
+            "one file. The wizard works out the source type from your choices."
+        )
+        self.import_button.clicked.connect(lambda: self.import_requested.emit())
         self.remove_button = QPushButton("Remove source")
         self.remove_button.setToolTip(
             "Remove the selected source and its variables from the project (the file is not touched)"
         )
         self.remove_button.clicked.connect(self._remove)
-        for b in (self.import_process, self.import_lab, self.remove_button):
+        for b in (self.import_button, self.remove_button):
             buttons.addWidget(b)
         buttons.addStretch(1)
 

@@ -193,6 +193,18 @@ def test_generate_example_in_background(window, qtbot, tmp_path, monkeypatch):
     assert not window.task_widget.isVisible()
 
 
+def test_import_page_has_one_primary_import_button(window, monkeypatch):
+    page = window.pages["import"]
+    # One entry point: the wizard resolves process vs lab from the user's choices.
+    assert not hasattr(page, "import_process") and not hasattr(page, "import_lab")
+    assert page.import_button.text() == "Import data…"
+    assert page.import_button.property("primary") is True
+    calls = []
+    monkeypatch.setattr(window, "import_dialog", lambda *a, **k: calls.append(1))
+    page.import_button.click()
+    assert calls == [1]
+
+
 def test_eda_page_computes_in_background(qtbot, window, example_copy):
     open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
     eda: EdaPage = window.pages["initial_eda"]
