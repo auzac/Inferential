@@ -5,11 +5,13 @@ and each line series draws from a precomputed min/max envelope while zoomed out,
 the raw samples of the visible window when zoomed in. The number of plots is capped so panning
 stays fluid on large data.
 
-The mouse works like a selection tool instead of a pan tool: dragging left-to-right draws a
-full-height highlight band across all charts, clicking pins the values at that point in time
-(emitted through ``point_selected`` / ``point_cleared``), and the hover crosshair keeps
-emitting ``hover`` for the "At cursor" box below the variable selection. The mouse wheel zooms,
-middle-drag pans and right-drag zooms to a box.
+Navigation is along the time axis only; each chart's y-axis fits the data on screen. The
+mouse works like a selection tool instead of a pan tool: dragging highlights a period on every
+chart and zooms to it on release, clicking pins the values at that point in time (emitted
+through ``point_selected`` / ``point_cleared``), and the hover crosshair keeps emitting
+``hover`` for the "At cursor" box below the variable selection. The wheel zooms and
+middle-drag pans. **Back** steps out one drag-zoom; **Fit all** shows all data. There is no
+right-click menu: those two buttons are the only view commands.
 """
 
 from __future__ import annotations
@@ -17,11 +19,21 @@ from __future__ import annotations
 import contextlib
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem, format_time
 
@@ -32,7 +44,8 @@ MAX_PLOTS = 12  # charts shown at once; more than this is slow to pan and hard t
 BINS = 2048  # envelope bins per series: the resolution of the zoomed-out view
 RAW_SPAN_BINS = 8  # zoomed in closer than this many bins: draw the raw samples instead
 POINTS_MAX = 5000  # markers drawn for sparse point series (lab samples)
-HIGHLIGHT_COLOUR = (0, 114, 178)  # drag-to-highlight band, matching the cleaning page's range
+HIGHLIGHT_COLOUR = (0, 114, 178)  # drag-to-zoom band, matching the cleaning page's range
+MIN_DRAG_PX = 6  # shorter drags are treated as clicks, not zooms
 PIN_COLOUR = "#0072B2"  # vertical line marking the pinned point in time
 
 
@@ -48,14 +61,16 @@ class TrendSeries:
 class _TrendViewBox(pg.ViewBox):
     """View box where the left button selects instead of panning.
 
-    Left-drag draws a full-height highlight band (handled by the owning
-    :class:`TrendView`), left-click pins the point in time under the mouse, middle-drag
-    pans and right-drag keeps the default zoom-to-box behaviour.
+    Left-drag highlights a period and zooms to it on release (handled by the owning
+    :class:`TrendView`), left-click pins the point in time under the mouse and middle-drag
+    pans along time. The right button does nothing (no context menu).
     """
 
     def __init__(self, view: TrendView) -> None:
-        super().__init__()
+        super().__init__(enableMenu=False)
         self._view = view
+        self.setMouseEnabled(x=True, y=False)  # wheel zooms time; y follows the data
+        self.setAutoVisible(y=True)
 
     def mouseDragEvent(self, ev, axis=None) -> None:  # noqa: ANN001 - pyqtgraph signature
         if ev.button() == Qt.MouseButton.LeftButton:
@@ -65,16 +80,15 @@ class _TrendViewBox(pg.ViewBox):
             self._view._pan_drag(self, ev)
             ev.accept()
         else:
-            super().mouseDragEvent(ev, axis)
+            ev.ignore()
 
     def mouseClickEvent(self, ev) -> None:  # noqa: ANN001 - pyqtgraph signature
-        # NOTE: ViewBox.mouseClickEvent takes no axis parameter (0.14); right-click
-        # raises the plot's context menu through it.
+        # NOTE: ViewBox.mouseClickEvent takes no axis parameter (0.14).
         if ev.button() == Qt.MouseButton.LeftButton:
             self._view._click_point(self, ev)
             ev.accept()
         else:
-            super().mouseClickEvent(ev)
+            ev.ignore()  # no right-click menu: Back / Fit all are the view commands
 
 
 class TrendView(QWidget):
@@ -99,8 +113,8 @@ class TrendView(QWidget):
         self._vline_of: dict[pg.PlotItem, pg.InfiniteLine] = {}
         self._sel_line_of: dict[pg.PlotItem, pg.InfiniteLine] = {}
         self._bands: list[tuple[pg.PlotItem, pg.LinearRegionItem]] = []
-        self._band_syncing = False
         self._drag_x0: float | None = None
+        self._zoom_history: list[tuple[float, float] | None] = []  # None = fitted to all data
         self._selected_x: float | None = None  # pinned point in time (None while unlocked)
         # group key -> series name -> (line/min item, max item or None, (points, id(x), id(y)))
         self._items: dict[
@@ -117,18 +131,30 @@ class TrendView(QWidget):
         self.mode.addItem("Group by units", "units")
         self.mode.setToolTip("Signals with different units always use separate y-axes.")
         self.mode.currentIndexChanged.connect(self._rebuild)
+        self.back_button = QPushButton("Back")
+        self.back_button.setToolTip("Return to the time range before the last drag-zoom")
+        self.back_button.clicked.connect(self.zoom_back)
+        self.back_button.setEnabled(False)
         self.fit_button = QPushButton("Fit all")
-        self.fit_button.setToolTip(
-            "Reset zoom to show all data "
-            "(wheel zooms, middle-drag pans, drag highlights, click pins a point)"
-        )
+        self.fit_button.setToolTip("Show all data")
         self.fit_button.clicked.connect(self.fit_all)
+        self.save_button = QPushButton("Save image…")
+        self.save_button.setToolTip("Save the charts as shown (PNG)")
+        self.save_button.clicked.connect(self._save_image)
+        self.hint = QLabel(
+            "Drag to zoom to a period · wheel zooms · middle-drag pans · click pins a point"
+        )
+        self.hint.setObjectName("placeholderNote")
 
         bar = QHBoxLayout()
         self.toolbar_layout = bar
         bar.addWidget(self.mode)
+        bar.addWidget(self.back_button)
         bar.addWidget(self.fit_button)
+        bar.addSpacing(8)
+        bar.addWidget(self.hint)
         bar.addStretch(1)
+        bar.addWidget(self.save_button)
 
         self.canvas = pg.GraphicsLayoutWidget()
         self.canvas.setBackground("w")
@@ -189,8 +215,41 @@ class TrendView(QWidget):
         return list(zip(self.plots, self._plot_series, strict=True))
 
     def fit_all(self) -> None:
+        self._zoom_history.clear()
+        self.back_button.setEnabled(False)
         for plot in self.plots:
             plot.enableAutoRange()
+
+    def zoom_to(self, lo: float, hi: float) -> None:
+        """Zoom the time axis to [lo, hi], remembering the current range for :meth:`zoom_back`."""
+        if not self.plots or hi <= lo:
+            return
+        self._zoom_history.append(self.x_range())
+        self.back_button.setEnabled(True)
+        self.set_x_range(lo, hi)
+
+    def save_image(self, path: str | Path) -> bool:
+        """Write the charts as currently shown to a PNG file."""
+        return self.canvas.grab().save(str(path), "PNG")
+
+    def _save_image(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save charts", "trends.png", "PNG image (*.png)"
+        )
+        if path and not self.save_image(path):
+            QMessageBox.warning(self, "Save image", f"Could not write {path}.")
+
+    def zoom_back(self) -> None:
+        """Undo the last drag-zoom (back to fit-all at the bottom of the history)."""
+        if not self._zoom_history:
+            return
+        previous = self._zoom_history.pop()
+        self.back_button.setEnabled(bool(self._zoom_history))
+        if previous is None:
+            for plot in self.plots:
+                plot.enableAutoRange()
+        else:
+            self.set_x_range(*previous)
 
     def x_range(self) -> tuple[float, float] | None:
         """Current visible time range, or None while the view is still auto-ranging to fit all data."""
@@ -223,6 +282,8 @@ class TrendView(QWidget):
     def _make_plot(self, units_label: str) -> pg.PlotItem:
         axis = TzDateAxisItem(self._tz)
         plot = pg.PlotItem(viewBox=_TrendViewBox(self), axisItems={"bottom": axis})
+        plot.setMenuEnabled(False)
+        plot.hideButtons()  # the "A" auto-range button duplicates Fit all
         plot.showGrid(x=True, y=True, alpha=0.15)
         plot.getAxis("left").setWidth(AXIS_WIDTH)
         plot.addLegend(offset=(5, 5), labelTextSize="8pt", brush=(255, 255, 255, 210))
@@ -254,6 +315,7 @@ class TrendView(QWidget):
         self.canvas.setVisible(has_data)
         self.empty_label.setVisible(not has_data)
         self.limit_label.setVisible(False)
+        self.save_button.setEnabled(has_data)
         if not has_data:
             return
         groups = self._groups()
@@ -281,6 +343,7 @@ class TrendView(QWidget):
         self.canvas.setVisible(has_data)
         self.empty_label.setVisible(not has_data)
         self.limit_label.setVisible(False)
+        self.save_button.setEnabled(has_data)
         if not has_data:
             self._clear_plots()
             return
@@ -341,6 +404,8 @@ class TrendView(QWidget):
         self.rebuilt.emit()
 
     def _clear_plots(self) -> None:
+        self._zoom_history.clear()
+        self.back_button.setEnabled(False)
         self.canvas.clear()  # removes and deletes all items (plots, curves, lines)
         self.plots, self._vlines, self._plot_series = [], [], []
         self._plot_keys, self._plot_by_key, self._key_of_plot = [], {}, {}
@@ -543,43 +608,43 @@ class TrendView(QWidget):
                 line.setVisible(False)
         self.point_cleared.emit()
 
-    # -- drag-to-highlight band (left-drag) ------------------------------------
+    # -- drag-to-zoom band (left-drag) -----------------------------------------
 
     def _band_drag(self, vb: pg.ViewBox, ev) -> None:  # noqa: ANN001 - pyqtgraph event
         if ev.isStart():
-            self._drag_x0 = vb.mapSceneToView(ev.scenePos()).x()
+            self._drag_x0 = vb.mapSceneToView(ev.buttonDownScenePos()).x()
         if self._drag_x0 is None:
             return
-        self._set_band(self._drag_x0, vb.mapSceneToView(ev.scenePos()).x())
+        x1 = vb.mapSceneToView(ev.scenePos()).x()
+        self._set_band(self._drag_x0, x1)
         if ev.isFinish():
-            self._drag_x0 = None
+            x0, self._drag_x0 = self._drag_x0, None
+            wide = abs(ev.scenePos().x() - ev.buttonDownScenePos().x()) >= MIN_DRAG_PX
+            self._finish_band(x0, x1, zoom=wide)
 
     def _set_band(self, x0: float, x1: float) -> None:
-        """Full-height highlight from x0 to x1 on every plot (kept in sync)."""
+        """Full-height highlight from x0 to x1 on every plot while dragging."""
         if self._selected_x is not None:
             self._clear_point()  # a new drag replaces the pinned point
         lo, hi = sorted((float(x0), float(x1)))
         if not self._bands:
             for plot in self.plots:
                 region = pg.LinearRegionItem(
-                    values=(lo, hi), brush=pg.mkBrush(*HIGHLIGHT_COLOUR, 40), movable=True
+                    values=(lo, hi), brush=pg.mkBrush(*HIGHLIGHT_COLOUR, 40), movable=False
                 )
                 region.setZValue(5)
-                region.sigRegionChanged.connect(self._band_moved)
                 plot.addItem(region, ignoreBounds=True)
                 self._bands.append((plot, region))
         else:
-            self._bands[0][1].setRegion((lo, hi))  # syncs the rest through _band_moved
+            for _plot, region in self._bands:
+                region.setRegion((lo, hi))
 
-    def _band_moved(self, region: pg.LinearRegionItem) -> None:
-        if self._band_syncing:
-            return
-        self._band_syncing = True
-        rng = tuple(region.getRegion())
-        for _plot, other in self._bands:
-            if other is not region:
-                other.setRegion(rng)
-        self._band_syncing = False
+    def _finish_band(self, x0: float, x1: float, *, zoom: bool = True) -> None:
+        """Release of a drag: zoom every chart to the highlighted period."""
+        self._clear_band()
+        lo, hi = sorted((float(x0), float(x1)))
+        if zoom and hi > lo:
+            self.zoom_to(lo, hi)
 
     def _clear_band(self) -> None:
         for plot, region in self._bands:
@@ -590,9 +655,9 @@ class TrendView(QWidget):
     # -- pan (middle-drag) -----------------------------------------------------
 
     def _pan_drag(self, vb: pg.ViewBox, ev) -> None:  # noqa: ANN001 - pyqtgraph event
-        p0 = vb.mapSceneToView(ev.lastPos())
-        p1 = vb.mapSceneToView(ev.pos())
-        dx, dy = p1.x() - p0.x(), p1.y() - p0.y()
+        """Pan along time only; the y-axis keeps fitting the visible data."""
+        p0 = vb.mapSceneToView(ev.lastScenePos())
+        p1 = vb.mapSceneToView(ev.scenePos())
+        dx = p1.x() - p0.x()
         x0, x1 = vb.viewRange()[0]
-        y0, y1 = vb.viewRange()[1]
-        vb.setRange(xRange=(x0 - dx, x1 - dx), yRange=(y0 - dy, y1 - dy), padding=0)
+        vb.setXRange(x0 - dx, x1 - dx, padding=0)

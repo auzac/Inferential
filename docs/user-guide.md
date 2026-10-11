@@ -1,6 +1,6 @@
 # User guide
 
-This guide covers **v0.5.2**: all nine stages, from data import to the model card. The **Help**
+This guide covers **v0.5.3**: all nine stages, from data import to the model card. The **Help**
 panel on the right gives a short guide to the stage on screen; **F1** opens this guide inside
 the application (offline).
 
@@ -14,9 +14,10 @@ removes the history.
 
 ## 1. Start with the example
 
-1. **Data Import → Generate example dataset…** and choose a folder. The app writes an artificial
-   distillation dataset (`tower_process.csv`, `lab_results.xlsx`), its ground truth and
-   `sample_project.imsproj`, then offers to open the project.
+1. **Help → Generate Example Dataset…** (also on the Data Import page of an empty project) and
+   choose a folder. The app writes an artificial distillation dataset (`tower_process.csv`,
+   `lab_results.xlsx`), its ground truth and `sample_project.imsproj`, then offers to open the
+   project.
 2. Or open the copy shipped with the application: `examples\synthetic_distillation\sample_project.imsproj`.
 
 Opening a project reads its data files in the background; the status bar shows progress and a
@@ -38,17 +39,18 @@ works out the source type from what you choose:
    the file, the local interpretation, the stored UTC time and the project display time.
    - If dates could be read either day-first or month-first (for example only days 1–12
      appear), the wizard says so and **Next stays disabled until you choose**. It never guesses.
-   - The optional **Lab / analyzer results** group holds the **result available** time (when the
-     lab reported the value) and a **sample ID** column. Setting either marks the file as lab
-     data; models are aligned to the sample time.
+   - Every file has **one timestamp column**. For lab results use the **sample time**: models
+     are aligned to it.
+   - The optional **Sample ID column** (e.g. a LIMS id) marks the file as lab data and keeps the
+     id with each sample for traceability.
 4. **Columns** — choose columns to import, their variable names, role (candidate predictor,
    target, not used) and units. Units are never guessed; type them if you know them. A column
    with little numeric content in the preview is shown in red.
    - One CSV with the target and the predictors is the common case: mark the lab column as
      target and the tags as candidate predictors — the source is process data, and the model
      aligns the target to the process timeline.
-   - A file with only the target (no predictors, or a result time / sample ID set) is lab /
-     analyzer data. Predictor columns cannot live in a lab source.
+   - A file with only the target (no predictors, or a sample ID column set) is lab / analyzer
+     data. Predictor columns cannot live in a lab source.
 5. **Duplicates** — what to do with rows sharing a timestamp. For process data the default
    stops and reports them so you can decide; lab replicates are kept separately by default.
 
@@ -64,27 +66,30 @@ Select a source on the Data Import page. The report lists, with severity:
 - duplicate and out-of-order timestamps, gaps and irregular sampling;
 - per column: cells holding text such as `Bad` or `I/O Timeout` (treated as invalid, not as
   numbers) and empty columns;
-- for lab data: samples without a value, result times earlier than sample times, and samples
-  outside the period covered by process data (a common sign of a timezone mistake).
+- for lab data: samples without a value, and samples outside the period covered by process data
+  (a common sign of a timezone mistake).
 
 ## 4. Explore the raw data (Initial EDA)
 
 Statistics are calculated in the background when you open the page. Tick variables in the list
-(use the filter box when there are many tags).
+(use the filter box when there are many tags; **All** / **None** act on the variables the filter
+shows). The trends, the correlation matrix and the scatter matrix all follow the ticked
+variables.
 
 - **Trends** — one plot per signal or grouped by units, on a shared time axis in the project's
-  display timezone. The mouse wheel zooms, middle-drag pans, right-drag zooms to a box and
-  **Fit all** resets. Drag left-to-right to highlight a time range across every chart (click
-  anywhere else to remove it); click a point to pin its values — the readout below the
-  variable list switches to *Selected point* and stays there until you click again. While
-  unpinned, hovering shows the values at the
-  cursor in the *At cursor* box, one line per signal (the last sample at or before it; nothing
-  is shown inside gaps). Lab samples appear as markers. Right-click a plot → *Export* to save
-  it as an image.
+  display timezone. **Drag across a chart to zoom to that period** (it is highlighted on every
+  chart while you drag); **Back** returns to the previous range and **Fit all** shows all data.
+  The mouse wheel zooms and middle-drag pans, both along time; each chart's y-axis fits the
+  data on screen. Click a point to pin its values — the readout below the variable list
+  switches to *Selected point* and stays there until you click again. While unpinned,
+  hovering shows the values at the cursor in the *At cursor* box, one line per signal (the
+  last sample at or before it; nothing is shown inside gaps). Lab samples appear as markers.
+  **Save image…** writes the charts as shown to a PNG file.
 - **Statistics** — count, valid/missing/invalid %, quartiles, mean, std, variance, CV,
   skewness, excess kurtosis. Sort by clicking a column header.
-- **Correlation** — Pearson or Spearman heatmap, optional |r| and grouping of similar
-  variables. Hover for r and the number of pairs; click a cell for the scatter plot.
+- **Correlation** — Pearson or Spearman heatmap of the ticked variables (it updates as you tick
+  and untick), optional |r| and grouping of similar variables. Hover for r and the number of
+  pairs; click a cell for the scatter plot.
 - **Scatter matrix** — for 2–6 ticked variables.
 - **Distribution** — histogram of any variable or the target.
 - **Coverage** — data availability over time per variable, and rows per time bin.

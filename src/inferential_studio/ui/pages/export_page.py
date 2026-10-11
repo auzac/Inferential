@@ -58,9 +58,17 @@ from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.theme import mark_primary
-from inferential_studio.ui.widgets.plots import legend, note_label, plot_widget, scatter
+from inferential_studio.ui.widgets.plots import (
+    clear_placeholder,
+    legend,
+    note_label,
+    plot_widget,
+    scatter,
+    show_placeholder,
+)
 from inferential_studio.ui.widgets.time_axis import to_epoch_seconds
 
+APPLY_PLACEHOLDER = "Load a model file, then apply it to the data in this project."
 TABLE_FILTER = "Excel workbook (*.xlsx);;CSV, comma separated (*.csv)"
 
 
@@ -191,6 +199,7 @@ class ExportPage(StagePage):
         self.btn_export_applied.clicked.connect(lambda: self.export_applied())
         self.apply_plot = plot_widget(time_axis=session.project.display_timezone)
         legend(self.apply_plot, "top-right")
+        show_placeholder(self.apply_plot, APPLY_PLACEHOLDER)
         self.apply_note = note_label()
         apply_box = QGroupBox("Apply a saved model (batch prediction)")
         al = QVBoxLayout(apply_box)
@@ -435,6 +444,7 @@ class ExportPage(StagePage):
         self._loaded_path = path
         self._prediction = None
         self.btn_export_applied.setEnabled(False)
+        show_placeholder(self.apply_plot, "Model loaded. Click Apply model to predict.")
         self._update_apply_state()
         return True
 
@@ -502,7 +512,7 @@ class ExportPage(StagePage):
         self._prediction = pred
         self._update_apply_state()
         self.btn_export_applied.setEnabled(True)
-        self.apply_plot.clear()
+        clear_placeholder(self.apply_plot)
         t = pred.table
         x = to_epoch_seconds(pd.DatetimeIndex(t["time"]))
         ok = (t["status"] == PRED_OK).to_numpy()

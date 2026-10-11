@@ -36,6 +36,40 @@ def plot_widget(title: str = "", *, time_axis: str | None = None) -> pg.PlotWidg
     return w
 
 
+def show_placeholder(plot: pg.PlotWidget, text: str) -> None:
+    """Empty state: no axes, grid or legend, just a short centred message.
+
+    Call :func:`clear_placeholder` before plotting data again.
+    """
+    plot.clear()
+    item = plot.getPlotItem()
+    item.showGrid(x=False, y=False)
+    for side in ("left", "bottom"):
+        item.showAxis(side, False)
+    if item.legend is not None:
+        item.legend.setVisible(False)
+    message = pg.TextItem(text, color="#596675", anchor=(0.5, 0.5))
+    message.setPos(0.5, 0.5)
+    item.addItem(message)
+    item.setMouseEnabled(x=False, y=False)
+    item.setRange(xRange=(0, 1), yRange=(0, 1), padding=0)
+    plot.setProperty("placeholder", text)
+
+
+def clear_placeholder(plot: pg.PlotWidget) -> None:
+    """Undo :func:`show_placeholder`: axes, grid and legend back, empty plot, auto-range on."""
+    plot.clear()
+    item = plot.getPlotItem()
+    item.showGrid(x=True, y=True, alpha=0.15)
+    for side in ("left", "bottom"):
+        item.showAxis(side, True)
+    if item.legend is not None:
+        item.legend.setVisible(True)
+    item.setMouseEnabled(x=True, y=True)
+    item.enableAutoRange()
+    plot.setProperty("placeholder", "")
+
+
 def legend(plot: pg.PlotWidget, corner: str = "top-left") -> pg.LegendItem:
     """Legend with an opaque background; ``corner`` keeps it clear of where the data usually is."""
     offsets = {"top-left": (5, 5), "top-right": (-5, 5), "bottom-right": (-5, -5)}

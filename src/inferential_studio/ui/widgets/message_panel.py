@@ -3,7 +3,16 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Slot
-from PySide6.QtGui import QBrush, QColor, QGuiApplication, QIcon, QPainter, QPainterPath, QPixmap
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QGuiApplication,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -20,8 +29,13 @@ from PySide6.QtWidgets import (
 
 from inferential_studio.ui.messages import APP, Level, Message, MessageCenter
 from inferential_studio.ui.stages import STAGES
+from inferential_studio.ui.theme import TOKENS
 
-LEVEL_COLOURS = {Level.INFO: "#2f6fa3", Level.WARNING: "#b86e00", Level.ERROR: "#b3261e"}
+LEVEL_COLOURS = {
+    Level.INFO: TOKENS["info"],
+    Level.WARNING: TOKENS["warning"],
+    Level.ERROR: TOKENS["error"],
+}
 LEVEL_NAMES = {Level.INFO: "Info", Level.WARNING: "Warning", Level.ERROR: "Error"}
 STAGE_TITLES = {s.key: f"{s.number}. {s.title}" for s in STAGES} | {APP: "Application"}
 ROWS_VISIBLE = 4
@@ -59,6 +73,28 @@ def level_icon(level: Level, size: int = 14) -> QIcon:
         Qt.AlignmentFlag.AlignCenter,
         glyph,
     )
+    p.end()
+    return QIcon(pm)
+
+
+def ok_icon(size: int = 14) -> QIcon:
+    """Green circle with a check mark, for "OK" status cells (pairs with :func:`level_icon`)."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(QColor(TOKENS["success"])))
+    s = float(size)
+    p.drawEllipse(QPointF(s / 2, s / 2), s / 2 - 1.5, s / 2 - 1.5)
+    pen = QPen(QColor("white"))
+    pen.setWidthF(max(1.5, s / 9))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    tick = QPainterPath(QPointF(s * 0.30, s * 0.52))
+    tick.lineTo(s * 0.45, s * 0.66)
+    tick.lineTo(s * 0.71, s * 0.36)
+    p.drawPath(tick)
     p.end()
     return QIcon(pm)
 
@@ -170,7 +206,7 @@ class MessagePanel(QFrame):
         if self.list.topLevelItemCount() == 0:
             empty = QTreeWidgetItem(["", "", "", "No messages."])
             empty.setFlags(Qt.ItemFlag.NoItemFlags)
-            empty.setForeground(3, QBrush(QColor("#8a96a3")))
+            empty.setForeground(3, QBrush(QColor(TOKENS["text_faint"])))
             self.list.addTopLevelItem(empty)
         counts = self._center.counts(self._source())
         for lvl, badge in self.badges.items():

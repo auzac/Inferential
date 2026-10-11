@@ -109,10 +109,11 @@ Listed in workflow order.
 | 9 Export & Report | `export_page.py` |
 
 `ui/widgets/` — reusable pieces: `message_panel.py` (fixed message log at the bottom),
-`trend_view.py` (synchronized trend charts), `cursor_readout.py`
+`trend_view.py` (synchronized trend charts: drag-to-zoom, Back, Fit all), `cursor_readout.py`
 (values at cursor), `overlays.py` (exclusion shading), `time_axis.py` (timezone-aware axis),
-`plots.py` (chart helpers for modelling pages), `heatmap.py`, `data_table.py` (pandas table view),
-`variable_list.py`, `timezone_combo.py`, `task_progress.py` (status-bar progress/cancel).
+`plots.py` (chart helpers, empty-chart placeholder), `heatmap.py`, `data_table.py` (pandas table
+view; number formatting in `format_value`), `variable_list.py`, `timezone_combo.py`,
+`task_progress.py` (status-bar progress/cancel).
 
 ## `tests/`
 

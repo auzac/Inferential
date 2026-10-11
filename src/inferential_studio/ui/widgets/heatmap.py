@@ -52,6 +52,10 @@ class CorrelationHeatmap(QWidget):
         self._texts: list[pg.TextItem] = []
         self._cell_font = QFont()
         self._cell_font.setPointSize(7)
+        self._placeholder = pg.TextItem("", color="#596675", anchor=(0.5, 0.5))
+        self._placeholder.setPos(0.5, 0.5)
+        self._placeholder.setVisible(False)
+        self.plot.addItem(self._placeholder)
 
         self.hover = QLabel(" ")
         layout = QVBoxLayout(self)
@@ -62,9 +66,30 @@ class CorrelationHeatmap(QWidget):
             self.canvas.scene().sigMouseMoved, rateLimit=30, slot=self._on_hover
         )
 
+    def set_placeholder(self, text: str) -> None:
+        """Show a message instead of a matrix (e.g. fewer than two variables chosen)."""
+        self._corr = pd.DataFrame()
+        self._pairs = None
+        for t in self._texts:
+            self.plot.removeItem(t)
+        self._texts = []
+        self.image.clear()
+        self.plot.getAxis("left").setTicks([[]])
+        self.plot.getAxis("bottom").setTicks([[]])
+        self.colorbar.setVisible(False)
+        self._placeholder.setText(text)
+        self._placeholder.setVisible(True)
+        self.plot.setRange(xRange=(0, 1), yRange=(0, 1), padding=0)
+        self.hover.setText(" ")
+
     def set_matrix(
         self, corr: pd.DataFrame, pairs: pd.DataFrame | None = None, *, absolute: bool = False
     ) -> None:
+        if len(corr) == 0:
+            self.set_placeholder("No variables to correlate.")
+            return
+        self._placeholder.setVisible(False)
+        self.colorbar.setVisible(True)
         self._corr = corr
         self._pairs = pairs
         self._absolute = absolute

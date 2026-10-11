@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox
 
 from inferential_studio.infrastructure.settings import AppSettings
@@ -205,6 +206,15 @@ def test_import_page_has_one_primary_import_button(window, monkeypatch):
     assert calls == [1]
 
 
+def test_import_page_example_box_only_for_empty_project(qtbot, window, example_copy):
+    page = window.pages["import"]
+    assert page.example_box.isVisibleTo(page)
+    assert window.act_example in window.help_menu.actions()  # always reachable from Help
+    open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
+    assert not page.example_box.isVisibleTo(page)
+    assert "Process data" in page.details.text() and "Checksum" in page.details.text()
+
+
 def test_eda_page_computes_in_background(qtbot, window, example_copy):
     open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
     eda: EdaPage = window.pages["initial_eda"]
@@ -224,6 +234,45 @@ def test_eda_page_computes_in_background(qtbot, window, example_copy):
         if not eda.var_list.item(i).isHidden()
     ]
     assert all("Tray" in v for v in visible) and len(visible) == 2
+
+
+def test_eda_correlation_follows_checked_variables(qtbot, window, example_copy):
+    open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
+    eda: EdaPage = window.pages["initial_eda"]
+    with qtbot.waitSignal(window.tasks.task_ended, timeout=30000):
+        window.sidebar.setCurrentRow(1)
+    qtbot.waitUntil(lambda: eda._result is not None, timeout=10000)
+    assert not hasattr(eda, "recalc") and not hasattr(eda, "only_selected")
+    assert eda.tabs.cornerWidget() is None
+    eda.tabs.setCurrentWidget(eda._corr_tab)
+    checked = eda.selected_variables()
+    assert list(eda.heatmap._corr.columns) == checked and len(checked) == 4
+    assert eda.count_label.text() == "4 of 8"
+
+    def apply() -> None:
+        eda._selection_timer.stop()
+        eda._apply_selection()
+
+    eda.var_list.item(0).setCheckState(Qt.CheckState.Unchecked)  # untick one
+    apply()
+    assert (
+        list(eda.heatmap._corr.columns) == eda.selected_variables() and len(eda.heatmap._corr) == 3
+    )
+    eda.check_all.click()
+    apply()
+    assert len(eda.heatmap._corr) == 8 and eda.count_label.text() == "8 of 8"
+    eda.heatmap.cell_clicked.emit("Tray_15_Temp", "Tray_20_Temp")
+    assert eda._pair == ("Tray_15_Temp", "Tray_20_Temp")
+    eda.search.setText("tray")
+    eda.check_none.click()  # only the filtered (visible) variables are unticked
+    apply()
+    assert len(eda.selected_variables()) == 6
+    assert eda._pair is None  # the shown pair left the matrix
+    eda.search.setText("")
+    eda.check_none.click()
+    apply()
+    assert eda.heatmap._corr.empty
+    assert "at least two" in eda.heatmap._placeholder.textItem.toPlainText()
 
 
 def test_project_settings_change_display_timezone(qtbot, window):

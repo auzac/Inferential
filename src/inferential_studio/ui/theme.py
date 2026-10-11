@@ -41,6 +41,7 @@ TOKENS = {
     "warning_soft": "#fff3df",
     "error": "#b3261e",
     "error_soft": "#fbe7e5",
+    "success": "#2e7d4f",  # "OK" status marks only
 }
 
 T = TOKENS
@@ -84,6 +85,7 @@ QLabel#pageEyebrow {{ color: {T["accent"]}; font-size: 7.5pt; font-weight: 700; 
 QLabel#pageTitle {{ font-size: 15pt; font-weight: 600; color: {T["text"]}; }}
 QLabel#pageGoal {{ color: {T["text_muted"]}; }}
 QLabel#placeholderNote {{ color: {T["text_muted"]}; font-size: 8.5pt; }}
+QLabel#sectionTitle {{ color: {T["text_muted"]}; font-weight: 600; }}
 
 /* ---- surfaces ---------------------------------------------------------------------- */
 QGroupBox {{ background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 4px;
@@ -275,3 +277,16 @@ def mark_primary(*buttons: QWidget) -> None:
         b.setProperty("primary", True)
         b.style().unpolish(b)
         b.style().polish(b)
+
+
+def theme_colour(token: str) -> QColor:
+    """A theme colour as a QColor (e.g. ``theme_colour("error")`` for a table cell)."""
+    return QColor(TOKENS[token])
+
+
+def tinted(text: str, token: str = "error", *, bold: bool = False) -> str:
+    """Rich text in a theme colour, for inline validation in dialogs (empty text stays empty)."""
+    if not text:
+        return ""
+    weight = "font-weight:600;" if bold else ""
+    return f"<span style='color:{TOKENS[token]};{weight}'>{text}</span>"
