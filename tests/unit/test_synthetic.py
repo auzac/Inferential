@@ -32,10 +32,9 @@ def test_process_grid_is_regular_utc(small_dataset):
     assert len(idx) == 6 * 24 * 60
 
 
-def test_lab_times_are_distinct_from_result_times(small_dataset):
+def test_lab_file_has_one_timestamp_and_sample_ids(small_dataset):
     lab = small_dataset.lab
-    delay = (lab["Result_Timestamp"] - lab["Sample_Timestamp"]).dt.total_seconds() / 60
-    assert delay.between(45, 120).all()
+    assert list(lab.columns) == ["Sample_Timestamp", "Product_Composition", "Sample_ID"]
     assert lab["Sample_ID"].is_unique
     assert lab["Sample_Timestamp"].isin(small_dataset.process.index).all()
 

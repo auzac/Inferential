@@ -9,6 +9,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
+from inferential_studio.ui.widgets.chart_menu import add_plot
+
 DIVERGING = pg.ColorMap(
     [0.0, 0.5, 1.0], [(33, 102, 172), (247, 247, 247), (178, 24, 43)]
 )  # blue-white-red
@@ -37,11 +39,10 @@ class CorrelationHeatmap(QWidget):
 
         self.canvas = pg.GraphicsLayoutWidget()
         self.canvas.setBackground("w")
-        self.plot = self.canvas.addPlot()
+        self.canvas.setProperty("chartName", "correlation")
+        self.plot = add_plot(self.canvas)
         self.plot.setAspectLocked(True)
         self.plot.invertY(True)
-        self.plot.setMenuEnabled(False)
-        self.plot.hideButtons()
         self.image = _ClickableImage()
         self.image.clicked.connect(self._on_click)
         self.plot.addItem(self.image)

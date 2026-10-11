@@ -33,10 +33,11 @@ from inferential_studio.ui.messages import Level
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
+from inferential_studio.ui.widgets.chart_menu import add_plot
 from inferential_studio.ui.widgets.cursor_readout import CursorReadout
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.heatmap import CorrelationHeatmap
-from inferential_studio.ui.widgets.plots import clear_placeholder, show_placeholder
+from inferential_studio.ui.widgets.plots import clear_placeholder, plot_widget, show_placeholder
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem, to_epoch_seconds
 from inferential_studio.ui.widgets.trend_view import PALETTE, TrendSeries, TrendView
 
@@ -177,8 +178,7 @@ class EdaPage(StagePage):
         self.corr_scope.setObjectName("placeholderNote")
         self.heatmap = CorrelationHeatmap()
         self.heatmap.cell_clicked.connect(self._show_pair)
-        self.pair_plot = pg.PlotWidget(background="w")
-        self.pair_plot.showGrid(x=True, y=True, alpha=0.15)
+        self.pair_plot = plot_widget(name="scatter")
         self.pair_note = QLabel()
         self.pair_note.setWordWrap(True)
         self._pair: tuple[str, str] | None = None
@@ -209,6 +209,7 @@ class EdaPage(StagePage):
 
         self.matrix = pg.GraphicsLayoutWidget()
         self.matrix.setBackground("w")
+        self.matrix.setProperty("chartName", "scatter_matrix")
         self.matrix_note = QLabel()
         self._matrix_tab = QWidget()
         ml = QVBoxLayout(self._matrix_tab)
@@ -218,8 +219,7 @@ class EdaPage(StagePage):
 
         self.hist_var = QComboBox()
         self.hist_var.currentIndexChanged.connect(self._update_histogram)
-        self.hist_plot = pg.PlotWidget(background="w")
-        self.hist_plot.showGrid(x=True, y=True, alpha=0.15)
+        self.hist_plot = plot_widget(name="distribution")
         self._hist_tab = QWidget()
         hl = QVBoxLayout(self._hist_tab)
         hl.addWidget(self.hist_var)
@@ -228,6 +228,7 @@ class EdaPage(StagePage):
 
         self.coverage_canvas = pg.GraphicsLayoutWidget()
         self.coverage_canvas.setBackground("w")
+        self.coverage_canvas.setProperty("chartName", "coverage")
         self._cov_tab = QWidget()
         cvl = QVBoxLayout(self._cov_tab)
         cvl.addWidget(self.coverage_canvas, 1)
@@ -530,8 +531,7 @@ class EdaPage(StagePage):
         sub = sub.iloc[idx]
         for i, yname in enumerate(names):
             for j, xname in enumerate(names):
-                p = self.matrix.addPlot(row=i, col=j)
-                p.hideButtons()
+                p = add_plot(self.matrix, row=i, col=j)
                 p.getAxis("left").setStyle(showValues=j == 0)
                 p.getAxis("bottom").setStyle(showValues=i == len(names) - 1)
                 if j == 0:
@@ -597,7 +597,7 @@ class EdaPage(StagePage):
         x0 = to_epoch_seconds(pd.DatetimeIndex([cov.bin_starts[0]]))[0]
         width = cov.bin_width.total_seconds() * n_bins
         tz = self._session.project.display_timezone
-        top = self.coverage_canvas.addPlot(row=0, col=0, axisItems={"bottom": TzDateAxisItem(tz)})
+        top = add_plot(self.coverage_canvas, row=0, col=0, axisItems={"bottom": TzDateAxisItem(tz)})
         img = pg.ImageItem(rgb.transpose(1, 0, 2), levels=(0, 255))  # true colours, no stretch
         img.setRect(QRectF(x0, 0, width, n_vars))
         top.addItem(img)
@@ -605,17 +605,13 @@ class EdaPage(StagePage):
         names = list(cov.valid_fraction.columns)
         top.getAxis("left").setTicks([[(i + 0.5, n) for i, n in enumerate(names)]])
         top.getAxis("bottom").setStyle(showValues=False)  # the time labels sit under the rows chart
-        top.hideButtons()
-        top.setMenuEnabled(False)
-        bottom = self.coverage_canvas.addPlot(
-            row=1, col=0, axisItems={"bottom": TzDateAxisItem(tz)}
+        bottom = add_plot(
+            self.coverage_canvas, row=1, col=0, axisItems={"bottom": TzDateAxisItem(tz)}
         )
-        bottom.hideButtons()
-        bottom.setMenuEnabled(False)
         # Same left-axis width on both charts so their time axes line up.
-        width = 60 + 6 * max((len(n) for n in names), default=0)
+        axis_width = 60 + 6 * max((len(n) for n in names), default=0)
         for plot in (top, bottom):
-            plot.getAxis("left").setWidth(width)
+            plot.getAxis("left").setWidth(axis_width)
         centres = x0 + (np.arange(n_bins) + 0.5) * cov.bin_width.total_seconds()
         bottom.plot(centres, cov.rows, pen=pg.mkPen(PALETTE[0], width=1.5), stepMode=None)
         bottom.setLabel("left", "Rows / bin")

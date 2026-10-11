@@ -213,17 +213,23 @@ def test_trend_view_short_drag_does_not_zoom(qtbot):
     assert not view.back_button.isEnabled()
 
 
-def test_trend_view_has_no_context_menu_or_autorange_button(qtbot, monkeypatch):
+def test_trend_view_right_click_opens_standard_chart_menu(qtbot, monkeypatch):
+    from inferential_studio.ui.widgets import chart_menu
+
     view = TrendView("UTC")
     qtbot.addWidget(view)
     x = to_epoch_seconds(pd.date_range("2026-01-01", periods=100, freq="1min", tz="UTC"))
     view.set_series([TrendSeries("A", x, np.arange(100.0))])
-    calls: list[Qt.MouseButton] = []
-    monkeypatch.setattr(pg.ViewBox, "raiseContextMenu", lambda self, ev: calls.append(ev.button()))
+    raw: list[Qt.MouseButton] = []
+    shown: list[object] = []
+    monkeypatch.setattr(pg.ViewBox, "raiseContextMenu", lambda self, ev: raw.append(ev.button()))
+    monkeypatch.setattr(chart_menu, "show_chart_menu", lambda v, pos: shown.append(v))
     view.plots[0].vb.mouseClickEvent(_click_event(view, float(x[50]), Qt.MouseButton.RightButton))
-    assert calls == []
-    assert not view.plots[0].vb.menuEnabled() and not view.plots[0].menuEnabled()
-    assert not view.plots[0].autoBtn.isVisible()
+    assert raw == []  # PyQtGraph's own menu (View All, axes, mouse mode …) never opens
+    assert shown == [view.canvas]  # the standard menu acts on every stacked chart
+    assert not view.plots[0].menuEnabled() and not view.plots[0].autoBtn.isVisible()
+    assert view._selected_x is None  # a right-click does not pin a point
+    assert not hasattr(view, "save_button")  # saving lives in the standard menu
     assert view.fit_button.text() == "Fit all"
 
 
@@ -273,3 +279,45 @@ def test_plot_placeholder_hides_axes_until_data(qtbot):
     clear_placeholder(plot)
     assert item.getAxis("left").isVisible() and item.legend.isVisible()
     assert plot.property("placeholder") == ""
+
+
+def test_every_chart_uses_the_standard_menu(qtbot, monkeypatch, tmp_path):
+    from inferential_studio.ui.widgets import chart_menu
+    from inferential_studio.ui.widgets.plots import plot_widget, show_placeholder
+
+    plot = plot_widget("Residual vs predicted")
+    qtbot.addWidget(plot)
+    plot.resize(400, 300)
+    plot.plot([0, 1, 2], [1, 3, 2])
+    assert isinstance(plot.getPlotItem().vb, chart_menu.ChartViewBox)
+    assert not plot.getPlotItem().autoBtn.isVisible()
+    shown: list[object] = []
+    monkeypatch.setattr(chart_menu, "show_chart_menu", lambda v, pos: shown.append(v))
+    vb = plot.getPlotItem().vb
+    press = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMousePress)
+    press.setScenePos(vb.mapViewToScene(pg.Point(1.0, 2.0)))
+    press.setButton(Qt.MouseButton.RightButton)
+    vb.mouseClickEvent(MouseClickEvent(press))
+    assert shown == [plot]
+    assert chart_menu.chart_name(plot) == "residual_vs_predicted"
+    assert chart_menu.save_chart(plot, tmp_path / "chart.png")
+    assert (tmp_path / "chart.png").stat().st_size > 0
+    show_placeholder(plot, "Nothing yet")  # no menu on an empty chart
+    vb.mouseClickEvent(MouseClickEvent(press))
+    assert shown == [plot]
+
+
+def test_chart_menu_has_copy_and_save_only(qtbot):
+    from inferential_studio.ui.widgets import chart_menu
+    from inferential_studio.ui.widgets.plots import plot_widget
+
+    plot = plot_widget(name="lag_sensitivity")
+    qtbot.addWidget(plot)
+    menu = chart_menu.show_chart_menu(plot, plot.mapToGlobal(plot.rect().center()))
+    assert [a.text() for a in menu.actions()] == ["Copy image", "Save image…"]
+    menu.close()
+    assert chart_menu.chart_name(plot) == "lag_sensitivity"
+    chart_menu.copy_chart(plot)
+    from PySide6.QtGui import QGuiApplication
+
+    assert not QGuiApplication.clipboard().pixmap().isNull()

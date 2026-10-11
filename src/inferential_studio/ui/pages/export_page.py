@@ -197,7 +197,9 @@ class ExportPage(StagePage):
         self.btn_export_applied = QPushButton("Export results…")
         self.btn_export_applied.setEnabled(False)
         self.btn_export_applied.clicked.connect(lambda: self.export_applied())
-        self.apply_plot = plot_widget(time_axis=session.project.display_timezone)
+        self.apply_plot = plot_widget(
+            time_axis=session.project.display_timezone, name="batch_prediction"
+        )
         legend(self.apply_plot, "top-right")
         show_placeholder(self.apply_plot, APPLY_PLACEHOLDER)
         self.apply_note = note_label()

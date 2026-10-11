@@ -26,6 +26,7 @@ coverage and a first X–Y screening.</p>
 <ul><li>Drag across a chart to zoom to that period; <b>Back</b> steps out, <b>Fit all</b> shows
 everything. The wheel zooms, middle-drag pans and a click pins the values at a time.</li>
 <li>The correlation matrix and scatter matrix follow the variables you tick.</li>
+<li>Right-click any chart to copy it or save it as an image.</li>
 <li>Shutdowns and regime changes inflate correlations; clean first, then judge.</li></ul>""",
     "cleaning": """
 <h3>Cleaning &amp; Exclusions</h3>

@@ -219,8 +219,8 @@ class ProcessingPage(StagePage):
         # -- preview / diagnostics tabs ------------------------------------------------
         self.tabs = QTabWidget()
         tz = session.project.display_timezone
-        self.x_plot = plot_widget(time_axis=tz)
-        self.y_plot = plot_widget(time_axis=tz)
+        self.x_plot = plot_widget(time_axis=tz, name="preview_x")
+        self.y_plot = plot_widget(time_axis=tz, name="preview_y")
         self.y_plot.setXLink(self.x_plot)
         legend(self.x_plot)
         self.sample_spin = QSpinBox()
@@ -252,7 +252,7 @@ class ProcessingPage(StagePage):
         pl.addWidget(self.sample_note)
         self.tabs.addTab(prev, "Preview")
 
-        self.lag_plot = plot_widget()
+        self.lag_plot = plot_widget(name="lag_sensitivity")
         self.lag_plot.setLabel("bottom", "Effective delay (deadtime + shift)", units="min")
         self.lag_plot.setLabel("left", "Pearson r with Y")
         self.lag_max = self._spin(1, 2880, " min", "Largest delay tested.")

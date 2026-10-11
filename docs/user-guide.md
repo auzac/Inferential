@@ -76,6 +76,9 @@ Statistics are calculated in the background when you open the page. Tick variabl
 shows). The trends, the correlation matrix and the scatter matrix all follow the ticked
 variables.
 
+Right-click **any chart** in the application for **Copy image** and **Save image…** (PNG or
+JPEG of the whole chart as shown — all stacked trends, the full scatter matrix).
+
 - **Trends** — one plot per signal or grouped by units, on a shared time axis in the project's
   display timezone. **Drag across a chart to zoom to that period** (it is highlighted on every
   chart while you drag); **Back** returns to the previous range and **Fit all** shows all data.
@@ -84,7 +87,6 @@ variables.
   switches to *Selected point* and stays there until you click again. While unpinned,
   hovering shows the values at the cursor in the *At cursor* box, one line per signal (the
   last sample at or before it; nothing is shown inside gaps). Lab samples appear as markers.
-  **Save image…** writes the charts as shown to a PNG file.
 - **Statistics** — count, valid/missing/invalid %, quartiles, mean, std, variance, CV,
   skewness, excess kurtosis. Sort by clicking a column header.
 - **Correlation** — Pearson or Spearman heatmap of the ticked variables (it updates as you tick

@@ -10,8 +10,8 @@ mouse works like a selection tool instead of a pan tool: dragging highlights a p
 chart and zooms to it on release, clicking pins the values at that point in time (emitted
 through ``point_selected`` / ``point_cleared``), and the hover crosshair keeps emitting
 ``hover`` for the "At cursor" box below the variable selection. The wheel zooms and
-middle-drag pans. **Back** steps out one drag-zoom; **Fit all** shows all data. There is no
-right-click menu: those two buttons are the only view commands.
+middle-drag pans. **Back** steps out one drag-zoom; **Fit all** shows all data. Right-click
+opens the standard chart menu (copy / save the charts as an image; see ``chart_menu``).
 """
 
 from __future__ import annotations
@@ -19,22 +19,21 @@ from __future__ import annotations
 import contextlib
 import warnings
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QFileDialog,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
+from inferential_studio.ui.widgets.chart_menu import ChartViewBox, tidy_plot
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem, format_time
 
 # Okabe–Ito colour-blind-safe palette (black replaced by dark grey).
@@ -58,16 +57,16 @@ class TrendSeries:
     points: bool = False  # draw as markers (sparse lab samples) instead of a line
 
 
-class _TrendViewBox(pg.ViewBox):
+class _TrendViewBox(ChartViewBox):
     """View box where the left button selects instead of panning.
 
     Left-drag highlights a period and zooms to it on release (handled by the owning
     :class:`TrendView`), left-click pins the point in time under the mouse and middle-drag
-    pans along time. The right button does nothing (no context menu).
+    pans along time. Right-click opens the standard chart menu; right-drag does nothing.
     """
 
     def __init__(self, view: TrendView) -> None:
-        super().__init__(enableMenu=False)
+        super().__init__()
         self._view = view
         self.setMouseEnabled(x=True, y=False)  # wheel zooms time; y follows the data
         self.setAutoVisible(y=True)
@@ -88,7 +87,7 @@ class _TrendViewBox(pg.ViewBox):
             self._view._click_point(self, ev)
             ev.accept()
         else:
-            ev.ignore()  # no right-click menu: Back / Fit all are the view commands
+            super().mouseClickEvent(ev)  # right-click: the standard chart menu
 
 
 class TrendView(QWidget):
@@ -138,13 +137,14 @@ class TrendView(QWidget):
         self.fit_button = QPushButton("Fit all")
         self.fit_button.setToolTip("Show all data")
         self.fit_button.clicked.connect(self.fit_all)
-        self.save_button = QPushButton("Save image…")
-        self.save_button.setToolTip("Save the charts as shown (PNG)")
-        self.save_button.clicked.connect(self._save_image)
-        self.hint = QLabel(
-            "Drag to zoom to a period · wheel zooms · middle-drag pans · click pins a point"
+        self.hint = QLabel("Drag to zoom · click to pin · right-click to copy or save")
+        self.hint.setToolTip(
+            "Drag across a chart to zoom to that period · wheel zooms · middle-drag pans · "
+            "click pins the values at a time · right-click copies or saves the charts"
         )
         self.hint.setObjectName("placeholderNote")
+        # Clip rather than widen the toolbar when the window is narrow.
+        self.hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
 
         bar = QHBoxLayout()
         self.toolbar_layout = bar
@@ -152,11 +152,10 @@ class TrendView(QWidget):
         bar.addWidget(self.back_button)
         bar.addWidget(self.fit_button)
         bar.addSpacing(8)
-        bar.addWidget(self.hint)
-        bar.addStretch(1)
-        bar.addWidget(self.save_button)
+        bar.addWidget(self.hint, 1)  # takes the rest of the row (left-aligned)
 
         self.canvas = pg.GraphicsLayoutWidget()
+        self.canvas.setProperty("chartName", "trends")
         self.canvas.setBackground("w")
         self.empty_label = QLabel("Select variables to plot.")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -228,17 +227,6 @@ class TrendView(QWidget):
         self.back_button.setEnabled(True)
         self.set_x_range(lo, hi)
 
-    def save_image(self, path: str | Path) -> bool:
-        """Write the charts as currently shown to a PNG file."""
-        return self.canvas.grab().save(str(path), "PNG")
-
-    def _save_image(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save charts", "trends.png", "PNG image (*.png)"
-        )
-        if path and not self.save_image(path):
-            QMessageBox.warning(self, "Save image", f"Could not write {path}.")
-
     def zoom_back(self) -> None:
         """Undo the last drag-zoom (back to fit-all at the bottom of the history)."""
         if not self._zoom_history:
@@ -282,8 +270,7 @@ class TrendView(QWidget):
     def _make_plot(self, units_label: str) -> pg.PlotItem:
         axis = TzDateAxisItem(self._tz)
         plot = pg.PlotItem(viewBox=_TrendViewBox(self), axisItems={"bottom": axis})
-        plot.setMenuEnabled(False)
-        plot.hideButtons()  # the "A" auto-range button duplicates Fit all
+        tidy_plot(plot)  # no PyQtGraph menu or "A" button (Fit all is the toolbar's)
         plot.showGrid(x=True, y=True, alpha=0.15)
         plot.getAxis("left").setWidth(AXIS_WIDTH)
         plot.addLegend(offset=(5, 5), labelTextSize="8pt", brush=(255, 255, 255, 210))
@@ -315,7 +302,6 @@ class TrendView(QWidget):
         self.canvas.setVisible(has_data)
         self.empty_label.setVisible(not has_data)
         self.limit_label.setVisible(False)
-        self.save_button.setEnabled(has_data)
         if not has_data:
             return
         groups = self._groups()
@@ -343,7 +329,6 @@ class TrendView(QWidget):
         self.canvas.setVisible(has_data)
         self.empty_label.setVisible(not has_data)
         self.limit_label.setVisible(False)
-        self.save_button.setEnabled(has_data)
         if not has_data:
             self._clear_plots()
             return

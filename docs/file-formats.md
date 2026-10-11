@@ -61,7 +61,7 @@ validates the format, sizes and that the predictor list matches the coefficients
 | Export | Format |
 |---|---|
 | Model card | One HTML file, inline CSS and SVG charts, no scripts or external references; print to PDF from a browser |
-| Predictions | `.xlsx` (sheets `Predictions`, `Notes`) or `.csv` (UTF-8 with BOM): `sample_time_utc`, `sample_time_local (<zone>)`, `sample_id`, `result_time_*`, `period`, actual, predicted, `residual (actual - predicted)`, `f[<tag>]` features |
+| Predictions | `.xlsx` (sheets `Predictions`, `Notes`) or `.csv` (UTF-8 with BOM): `sample_time_utc`, `sample_time_local (<zone>)`, `sample_id`, `result_time_*` (only for projects that record a result time), `period`, actual, predicted, `residual (actual - predicted)`, `f[<tag>]` features |
 | Feature matrix | Every lab sample: times, ids, target, features, `eligible`, `reason` |
 | Batch prediction | `time_utc`, `time_local`, `prediction`, `status`, `reason`, `n_outside_training_range`, `outside_training_range`, `f[<tag>]` |
 
@@ -93,7 +93,7 @@ damages the previous version.
 | File | Content |
 |---|---|
 | `tower_process.csv` | 1-minute process data, plant local time (Asia/Singapore), **day-first** `dd/mm/yyyy HH:MM` |
-| `lab_results.xlsx` | Sheet `Lab`: `Sample_Timestamp`, `Result_Timestamp` (`yyyy-mm-dd HH:MM`, local), `Product_Composition`, `Sample_ID` |
+| `lab_results.xlsx` | Sheet `Lab`: `Sample_Timestamp` (`yyyy-mm-dd HH:MM`, local), `Product_Composition`, `Sample_ID` |
 | `ground_truth.json` | Generator configuration, target dynamics and every injected event (UTC) |
 | `sample_project.imsproj` | Project referencing the two data files (reference mode) |
 

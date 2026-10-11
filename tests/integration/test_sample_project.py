@@ -17,7 +17,8 @@ def test_committed_sample_project_loads_and_sources_verify():
     project = load_project(project_path)
     assert project.target is not None and project.target.name == "Product_Composition"
     assert {s.kind for s in project.sources} == {SourceKind.PROCESS, SourceKind.LAB}
-    assert project.source("lab").result_timestamp is not None
+    lab = project.source("lab")
+    assert lab.result_timestamp is None and lab.sample_id_column == "Sample_ID"  # one timestamp
     assert project.source("process").timestamp.dayfirst is True
     for source in project.sources:
         assert verify_source(source, project_path) is None, source.path

@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from inferential_studio.core.splits import PURGED, TEST, TRAIN, VALIDATION
+from inferential_studio.ui.widgets.chart_menu import ChartViewBox, tidy_plot
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem
 
 SPLIT_COLOURS = {
@@ -23,10 +24,19 @@ POSITIVE = "#0072B2"
 NEGATIVE = "#D55E00"
 
 
-def plot_widget(title: str = "", *, time_axis: str | None = None) -> pg.PlotWidget:
-    """White plot with a grid; ``time_axis`` = display timezone for a date axis at the bottom."""
+def plot_widget(
+    title: str = "", *, time_axis: str | None = None, name: str | None = None
+) -> pg.PlotWidget:
+    """White plot with a grid and the standard right-click menu (see ``chart_menu``).
+
+    ``time_axis`` = display timezone for a date axis at the bottom; ``name`` = file-name stem
+    offered by *Save image…* (defaults to the title).
+    """
     axis = {"bottom": TzDateAxisItem(time_axis)} if time_axis else None
-    w = pg.PlotWidget(background="w", axisItems=axis)
+    w = pg.PlotWidget(background="w", axisItems=axis, viewBox=ChartViewBox())
+    tidy_plot(w.getPlotItem())
+    if name:
+        w.setProperty("chartName", name)
     w.showGrid(x=True, y=True, alpha=0.15)
     for name in ("left", "bottom"):
         w.getAxis(name).enableAutoSIPrefix(False)  # show values as they are, no "(x0.001)"

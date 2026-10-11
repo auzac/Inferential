@@ -109,6 +109,8 @@ Listed in workflow order.
 | 9 Export & Report | `export_page.py` |
 
 `ui/widgets/` — reusable pieces: `message_panel.py` (fixed message log at the bottom),
+`chart_menu.py` (the one right-click menu every chart uses: Copy / Save image; create charts with
+`plots.plot_widget` or `chart_menu.add_plot` so they get it),
 `trend_view.py` (synchronized trend charts: drag-to-zoom, Back, Fit all), `cursor_readout.py`
 (values at cursor), `overlays.py` (exclusion shading), `time_axis.py` (timezone-aware axis),
 `plots.py` (chart helpers, empty-chart placeholder), `heatmap.py`, `data_table.py` (pandas table
@@ -153,5 +155,6 @@ Run everything: `pytest` (about 3 minutes). Lint: `ruff check src tests` and `ru
 | Help text on a page | `ui/help.py` |
 | A warning or status message | `session.messages` (`ui/messages.py`), shown by `ui/widgets/message_panel.py` |
 | Colours, fonts, spacing | `ui/theme.py` (`TOKENS`) |
+| Chart right-click menu | `ui/widgets/chart_menu.py` |
 | Logs and settings on a PC | `%LOCALAPPDATA%\InferentialModelStudio\` (Tools → Open Log Folder) |
 | Regenerate the example | `inferential-studio-synth --out examples/synthetic_distillation` |

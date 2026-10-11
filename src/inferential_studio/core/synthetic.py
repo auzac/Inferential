@@ -8,8 +8,8 @@ Process data: 1-minute historian-style wide table with realistic artefacts
     * two shutdowns, a low-load period, a genuine feed upset (valid data!)
     * isolated pressure-transmitter spikes, a stuck (flatlined) top temperature,
       a communication gap in feed temperature
-Lab data: product composition sampled about every 2 hours, with separate sample-collection
-and result-availability times, measurement noise and one gross analyzer error.
+Lab data: product composition sampled about every 2 hours (one timestamp per sample: the
+collection time), with a sample ID, measurement noise and one gross analyzer error.
 
 Ground-truth dynamics of the target (top product purity, mole fraction):
 
@@ -93,9 +93,7 @@ class SyntheticConfig:
 @dataclass
 class SyntheticDataset:
     process: pd.DataFrame  # UTC DatetimeIndex named "Timestamp", one column per tag
-    lab: (
-        pd.DataFrame
-    )  # columns Sample_Timestamp, Result_Timestamp (UTC), Product_Composition, Sample_ID
+    lab: pd.DataFrame  # columns Sample_Timestamp (UTC), Product_Composition, Sample_ID
     target_truth: pd.Series  # noiseless target on the process grid (UTC index)
     truth: dict[str, Any]  # JSON-serialisable description of everything injected
 
@@ -253,7 +251,9 @@ def generate_distillation_dataset(
     # Nobody samples a column that is shut down or has run normally for less than ~3 hours.
     settled = pd.Series(running > 0.99).rolling(180, min_periods=1).min().to_numpy() > 0.5
     sample_idx = sample_idx[settled[sample_idx]]
-    delay_min = rng.integers(45, 121, size=sample_idx.size)
+    # Formerly the result-reporting delay. Still drawn so the random stream, and with it the
+    # lab values below, stay exactly as in earlier examples.
+    rng.integers(45, 121, size=sample_idx.size)
     values = y_true[sample_idx] + rng.normal(0, cfg.lab_noise_sd, sample_idx.size)
     bad_pos = int(sample_idx.size * 0.8)
     values[bad_pos] = 0.900  # gross analyzer / transcription error
@@ -262,7 +262,6 @@ def generate_distillation_dataset(
     lab = pd.DataFrame(
         {
             "Sample_Timestamp": index[sample_idx],
-            "Result_Timestamp": index[sample_idx] + pd.to_timedelta(delay_min, unit="min"),
             "Product_Composition": np.round(values, 4),
             "Sample_ID": sample_ids,
         }
@@ -325,8 +324,7 @@ def write_example_files(
     report(progress, 0.5, "Writing lab Excel workbook")
     check(cancel)
     lab = dataset.lab.copy()
-    for col in ("Sample_Timestamp", "Result_Timestamp"):
-        lab[col] = lab[col].dt.tz_convert(tz).dt.strftime(LAB_TIME_FORMAT)
+    lab["Sample_Timestamp"] = lab["Sample_Timestamp"].dt.tz_convert(tz).dt.strftime(LAB_TIME_FORMAT)
     lab_path = out / LAB_FILE
     lab.to_excel(lab_path, sheet_name="Lab", index=False)
 
@@ -375,9 +373,6 @@ def build_sample_project(
             sheet="Lab",
             timestamp=TimestampSpec(
                 column="Sample_Timestamp", format=LAB_TIME_FORMAT, source_timezone=tz
-            ),
-            result_timestamp=TimestampSpec(
-                column="Result_Timestamp", format=LAB_TIME_FORMAT, source_timezone=tz
             ),
             sample_id_column="Sample_ID",
         ),

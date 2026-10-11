@@ -16,8 +16,11 @@ production release is `v1.0.0`.
   own when data changes.
 - Trends (Initial EDA, Cleaning): **drag across a chart to zoom to that period**; a new **Back**
   button steps out and **Fit all** shows everything. Navigation is along time only and each
-  y-axis fits the data on screen. The right-click menu (with its duplicate *View All*) and the
-  small "A" auto-range button are removed; **Save image…** replaces the menu's export.
+  y-axis fits the data on screen.
+- **One right-click menu for every chart** (trends, EDA, modelling, validation, export):
+  **Copy image** and **Save image…**, acting on the whole chart as shown. PyQtGraph's own menu
+  (*View All*, axis and mouse-mode options, export dialog) and its small "A" auto-range button
+  are gone everywhere.
 - Tables show numbers to five significant figures, floating-point residue (e.g. an OLS training
   bias of 1e-17) as 0, counts with thousands separators and Yes/No for flags.
 - Data Import: the source details are a labelled summary; OK sources and reports show a green
@@ -28,6 +31,9 @@ production release is `v1.0.0`.
 - Coverage chart: calmer green (colours were being stretched), time axes of both charts line up.
 - Empty charts (EDA scatter, batch prediction) show a short message instead of bare axes.
 - Inline validation text uses the theme's error / warning colours throughout.
+- Example dataset: the lab file has a single timestamp (`Sample_Timestamp`) and the sample
+  project no longer records a result time. Process data, lab values and ground truth are
+  unchanged.
 
 ## v0.5.2 — Single data import flow (2026-10-12)
 

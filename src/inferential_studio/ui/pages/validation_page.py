@@ -96,7 +96,7 @@ class ValidationPage(StagePage):
         self.res_pred = plot_widget("Residual vs predicted")
         self.res_x_var = QComboBox()
         self.res_x_var.currentIndexChanged.connect(self._update_residual_x)
-        self.res_x = plot_widget()
+        self.res_x = plot_widget(name="residuals_vs_x")
         self.res_hist = plot_widget("Residual distribution")
         legend(self.res_hist, "top-right")
         self.res_acf = plot_widget("Residual autocorrelation (consecutive lab samples)")
