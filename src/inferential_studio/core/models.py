@@ -33,7 +33,14 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler, StandardScaler
 
 from inferential_studio.core.features import FeatureMatrix
-from inferential_studio.core.schemas import ModelKind, ModellingConfig, ModelSpec, Scaling
+from inferential_studio.core.schemas import (
+    AlignmentConfig,
+    FeatureSpec,
+    ModelKind,
+    ModellingConfig,
+    ModelSpec,
+    Scaling,
+)
 from inferential_studio.core.splits import (
     PURGED,
     SPLITS,
@@ -377,6 +384,8 @@ class TrainingRun:
     n_effective: float
     versions: dict[str, str]
     feature_notes: list[str] = field(default_factory=list)
+    feature_specs: dict[str, FeatureSpec] = field(default_factory=dict)  # as used for training
+    alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
 
     @property
     def errors(self) -> list[str]:
@@ -492,6 +501,8 @@ def train_models(
         n_effective=effective_sample_size(y_tr) if y_tr.size else 0.0,
         versions=_versions(),
         feature_notes=list(fm.notes),
+        feature_specs=dict(fm.specs),
+        alignment=fm.alignment,
     )
     if run.errors:
         return run

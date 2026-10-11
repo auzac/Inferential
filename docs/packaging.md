@@ -14,8 +14,10 @@ one-folder application with PyInstaller (`packaging/pyinstaller.spec`), launches
 synthetic dataset, so missing bundled numerics fail the build), and writes `packaging/output/InferentialModelStudio-<version>-win64.zip` plus a
 `.sha256` checksum.
 
-Status at v0.4.0: the spec has been built and smoke-tested **on Linux** (bundle ≈ 349 MB;
-the smoke test trains MLR, PLS, PCR and Ridge inside the frozen bundle). The PowerShell script and the Windows build have
+Status at v0.5.0: the one-folder bundle has been built and smoke-tested **on Linux** (≈ 349 MB;
+both smoke tests pass inside the frozen bundle). The PowerShell scripts were syntax-checked with
+PowerShell 7 on Linux. The Windows build, the Inno Setup installer and the installer smoke test
+have **not yet been run on Windows** — that is the remaining release gate for v1.0.0. The PowerShell script and the Windows build have
 **not yet been run on Windows**.
 
 ## Why one-folder, no UPX
@@ -26,8 +28,44 @@ the smoke test trains MLR, PLS, PCR and Ridge inside the frozen bundle). The Pow
 
 ## Installer
 
-A conventional per-user installer (Inno Setup) wrapping the one-folder build is added in
-Milestone 5, together with the application icon, Start-menu entry and uninstaller.
+`packaging/installer/InferentialModelStudio.iss` (Inno Setup 6) wraps the one-folder build in a
+conventional **per-user** installer — no administrator rights needed:
+
+- installs to `%LOCALAPPDATA%\Programs\InferentialModelStudio`; Start-menu entries for the
+  application and the bundled example project; optional desktop shortcut;
+- optional association of `.imsproj` files (per user, HKCU);
+- uninstaller registered under *Apps & features*; uninstalling removes the program and the
+  cache of extracted portable-project data, and keeps settings, logs and recovery copies;
+- application icon `assets/icons/app.ico` (drawn by `packaging/make_icon.py`), version
+  resource and Windows file details.
+
+`windows_build.ps1` builds the installer when Inno Setup 6 is installed (`ISCC.exe` on PATH or in
+its default folder, or `-Iscc <path>`) and then runs `packaging/installer_smoke_test.ps1`:
+silent per-user install into a temporary folder → `--smoke-test` → the full workflow on the
+bundled example (load data, align, train all models, write a model card) → silent uninstall →
+check that the program folder is gone. Outputs: `InferentialModelStudio-<version>-win64.zip`
+(portable folder) and `InferentialModelStudio-<version>-setup-win64.exe`, each with a `.sha256`.
+
+## Smoke tests
+
+- `InferentialModelStudio.exe --smoke-test` — create the main window and train MLR, PLS, PCR
+  and Ridge on a small synthetic dataset; exit code 0 = pass.
+- `InferentialModelStudio.exe <project.imsproj> --smoke-test` — open the project, wait for its
+  data and aligned features, train, write `smoke-model-card.html` to the settings folder, exit
+  0; any failure (missing data, no trainable model, timeout after 3 minutes) exits non-zero.
+  Both run in the automated tests from source (`tests/integration/test_app_smoke.py`).
+
+## Release checklist (manual, on a clean Windows 10/11 x64 VM without Python)
+
+1. Run `windows_build.ps1` on the build PC (tests, bundle, installer, installer smoke test).
+2. On the clean VM: install with the setup exe (no admin prompt expected), start from the Start
+   menu, open the example from the Start menu entry.
+3. Walk the sample journey: import the example files by hand, clean, select variables, align,
+   train, validate, reveal the test, export the model card, predictions and model file, save,
+   close, reopen (results reproduced), save a portable copy and open it elsewhere.
+4. Check display scaling at 100 %, 150 % and 200 %.
+5. Launch and close several times; check `%LOCALAPPDATA%\InferentialModelStudio\logs`.
+6. Uninstall; confirm the program folder and Start-menu entries are gone.
 
 ## Licensing release gate (PySide6 / Qt under LGPL v3)
 

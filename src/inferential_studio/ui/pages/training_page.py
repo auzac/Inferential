@@ -186,7 +186,7 @@ class TrainingPage(StagePage):
     def refresh(self) -> None:
         run = self._session.training
         self._update_button()
-        lines = []
+        lines = [self._session.reproduction] if self._session.reproduction else []
         if self._session.training_stale:
             lines.append(
                 "Settings or data changed since these models were trained. The results below are "

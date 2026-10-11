@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import replace
 from pathlib import Path
@@ -10,11 +11,22 @@ from typing import TYPE_CHECKING
 import pandas as pd
 from PySide6.QtCore import QObject, Signal
 
+from inferential_studio.core.artifacts import compare_results, results_summary
 from inferential_studio.core.dataset import ProjectData, SourceData
 from inferential_studio.core.exclusions import CleaningState, compute_cleaning
 from inferential_studio.core.features import AlignmentError, FeatureMatrix, build_project_features
 from inferential_studio.core.models import TrainingRun
-from inferential_studio.core.persistence import load_project, rebase_source_paths, save_project
+from inferential_studio.core.persistence import (
+    PORTABLE,
+    REFERENCE,
+    extract_embedded,
+    load_project,
+    load_results,
+    read_manifest,
+    rebase_source_paths,
+    resolve_source_path,
+    save_project,
+)
 from inferential_studio.core.quality import DetectorResult
 from inferential_studio.core.schemas import (
     DataSource,
@@ -68,7 +80,7 @@ class ProjectSession(QObject):
     # Project attributes that undoable edits replace wholesale.
     CLEANING_LISTS = ("exclusions", "rules", "detectors", "flag_decisions")
     INPUT_LISTS = ("variables", "features")
-    CONFIGS = ("alignment", "modelling")
+    CONFIGS = ("alignment", "modelling", "report")
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -91,6 +103,10 @@ class ProjectSession(QObject):
         self.training: TrainingRun | None = None
         self.training_stale = False  # inputs changed since the run: results kept but marked
         self.test_revealed = False  # the user chose to look at final-test results of this run
+        self.storage = REFERENCE  # or PORTABLE: data files embedded in the project file
+        self.embedded_paths: dict[str, Path] = {}  # portable: extracted data per source id
+        self.saved_results: dict | None = None  # training summary stored in the project file
+        self.reproduction: str | None = None  # outcome of re-training a reopened project
         self.cleaning_changed.connect(self.recompute_features)
 
     # ------------------------------------------------------------------ state
@@ -120,22 +136,67 @@ class ProjectSession(QObject):
     def new(self, project: Project | None = None) -> None:
         self._replace(project or Project(), None)
 
-    def open(self, path: str | Path) -> None:
-        """Load the configuration synchronously (small). Data is loaded separately in the background."""
-        project = load_project(path)
-        self._replace(project, Path(path))
+    def open(self, path: str | Path, *, cache_dir: Path | None = None) -> None:
+        """Load the configuration synchronously (small). Data is loaded separately in the background.
 
-    def save(self, path: str | Path | None = None) -> Path:
+        Portable projects have their embedded data files extracted (verified) to ``cache_dir``.
+        """
+        path = Path(path)
+        project = load_project(path)
+        manifest = read_manifest(path)
+        embedded: dict[str, Path] = {}
+        if manifest.get("storage") == PORTABLE:
+            if cache_dir is None:
+                raise ValueError("A cache folder is needed to open a portable project.")
+            key = hashlib.sha256(
+                f"{path.resolve()}|{manifest.get('saved_at')}".encode()
+            ).hexdigest()
+            embedded = extract_embedded(path, cache_dir / key[:16])
+        saved_results = load_results(path)
+        self._replace(project, path)
+        self.storage = manifest.get("storage", REFERENCE)
+        self.embedded_paths = embedded
+        self.saved_results = saved_results
+
+    def open_recovered(self, copy_path: Path, original_path: Path | None) -> None:
+        """Open a crash-recovery copy as unsaved changes to its original file."""
+        project = load_project(copy_path)
+        self._replace(project, copy_path)
+        self._path = original_path
+        self.path_changed.emit(original_path)
+        self._set_dirty(True)
+
+    def source_file(self, source: DataSource) -> Path:
+        """Where a source's data is read from (extracted copy for portable projects)."""
+        return self.embedded_paths.get(source.source_id) or resolve_source_path(source, self._path)
+
+    def save(self, path: str | Path | None = None, *, portable: bool | None = None) -> Path:
+        """Save (reference or portable). ``portable`` None keeps the current storage mode."""
         target = Path(path) if path is not None else self._path
         if target is None:
             raise ValueError("No file name given for the project.")
+        portable = self.storage == PORTABLE if portable is None else portable
+        embed = (
+            {s.source_id: self.source_file(s) for s in self._project.sources} if portable else None
+        )
+        results = None
+        if self.training is not None and not self.training_stale:
+            results = results_summary(self.training, test_revealed=self.test_revealed)
         project = rebase_source_paths(self._project, self._path, target)
-        self._project = save_project(project, target)
+        if portable and self.embedded_paths:
+            # Keep the original file names; the data travels inside the project.
+            project = replace(project, sources=[
+                replace(s, path=old.path) for s, old in zip(project.sources, self._project.sources, strict=True)
+            ])  # fmt: skip
+        self._project = save_project(project, target, embed=embed, results=results)
         for src in self._project.sources:  # keep loaded data pointing at the rebased source spec
             loaded = self._data.sources.get(src.source_id)
             if loaded is not None:
                 loaded.source = replace(loaded.source, path=src.path)
         self._path = target
+        self.storage = PORTABLE if portable else REFERENCE
+        if results is not None:
+            self.saved_results = results
         self.path_changed.emit(target)
         self._set_dirty(False)
         return target
@@ -354,10 +415,23 @@ class ProjectSession(QObject):
 
     # ------------------------------------------------------------------ training
 
-    def set_training(self, run: TrainingRun) -> None:
+    def set_training(self, run: TrainingRun, *, reproduce: bool = False) -> None:
+        """Install a training run. ``reproduce``: it re-runs the saved results of a reopened project."""
         self.training = run
         self.training_stale = False
         self.test_revealed = False
+        self.reproduction = None
+        saved = self.saved_results
+        if reproduce and saved is not None:
+            diffs = compare_results(saved, run)
+            when = str(saved.get("saved_at", ""))[:16].replace("T", " ")
+            self.reproduction = (
+                f"✓ Results saved on {when} UTC were reproduced."
+                if not diffs
+                else f"⚠ Results differ from those saved on {when} UTC: " + " ".join(diffs[:4])
+            )
+            # Having looked at the final test is a fact about the project, not about one run.
+            self.test_revealed = bool(saved.get("test_revealed"))
         self.training_changed.emit()
 
     def reveal_test(self) -> None:
@@ -455,6 +529,10 @@ class ProjectSession(QObject):
 
     def _replace(self, project: Project, path: Path | None) -> None:
         self._project = project
+        self.storage = REFERENCE
+        self.embedded_paths = {}
+        self.saved_results = None
+        self.reproduction = None
         self.training = None
         self.training_stale = False
         self.test_revealed = False

@@ -161,12 +161,24 @@ class WindowResult:
     status: np.ndarray  # object array of status codes
 
 
-def _aggregate(x: np.ndarray, how: Aggregation) -> float:
-    if how is Aggregation.MEDIAN:
-        return float(np.median(x))
-    if how is Aggregation.STD:
-        return float(x.std(ddof=1)) if x.size > 1 else np.nan
-    raise ValueError(how)  # the other aggregations are vectorised
+def _grouped_aggregate(
+    x: np.ndarray, start: np.ndarray, count: np.ndarray, how: Aggregation
+) -> np.ndarray:
+    """Median or SD of many windows at once: windows with the same number of values are
+    gathered into one matrix (regular sampling gives only a few distinct counts)."""
+    out = np.empty(start.size)
+    chunk_cells = 4_000_000  # bound the temporary matrix (~32 MB)
+    for n in np.unique(count):
+        rows = np.flatnonzero(count == n)
+        step = max(1, chunk_cells // int(n))
+        for c in range(0, rows.size, step):
+            r = rows[c : c + step]
+            block = x[start[r, None] + np.arange(n)]
+            if how is Aggregation.MEDIAN:
+                out[r] = np.median(block, axis=1)
+            else:
+                out[r] = block.std(axis=1, ddof=1) if n > 1 else np.nan
+    return out
 
 
 def _range_reduce(ufunc: np.ufunc, a: np.ndarray, s: np.ndarray, e: np.ndarray) -> np.ndarray:
@@ -210,8 +222,7 @@ def aggregate_windows(
         elif how is Aggregation.LAST:
             value[has] = xv[e - 1]
         else:
-            for k, s_k, e_k in zip(has, s, e, strict=True):
-                value[k] = _aggregate(xv[s_k:e_k], how)
+            value[has] = _grouped_aggregate(xv, s, e - s, how)
         edge = np.maximum(tv[s] - lo[has], hi[has] - tv[e - 1])
         inner = np.zeros(has.size, dtype=np.int64)
         multi = (e - s) > 1
@@ -268,6 +279,7 @@ class FeatureMatrix:
     result_time: pd.DatetimeIndex | None = None
     sample_id: np.ndarray | None = None
     notes: list[str] = field(default_factory=list)
+    alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
 
     @property
     def features(self) -> list[str]:
@@ -424,6 +436,7 @@ def build_feature_matrix(
         result_time=target.result_times[order] if target.result_times is not None else None,
         sample_id=target.sample_ids[order] if target.sample_ids is not None else None,
         notes=notes,
+        alignment=alignment,
     )
 
 

@@ -255,3 +255,92 @@ def test_modelling_settings_roundtrip(tmp_path, project):
     project = replace(project, modelling=cfg)
     save_project(project, tmp_path / "m.imsproj")
     assert load_project(tmp_path / "m.imsproj").modelling == cfg
+
+
+# --------------------------------------------------------------------------- schema 5
+
+
+def _portable(tmp_path, project):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    proc = data_dir / "tower_process.csv"
+    proc.write_text("Timestamp,x\n01/01/2026 00:00,1\n", encoding="utf-8")
+    lab = data_dir / "lab_results.xlsx"
+    lab.write_bytes(b"not really excel")
+    sources = [replace(s, sha256=sha256_file(proc if s.kind is SourceKind.PROCESS else lab))
+               for s in project.sources]  # fmt: skip
+    project = replace(project, sources=sources)
+    path = tmp_path / "out" / "portable.imsproj"
+    save_project(project, path, embed={"process": proc, "lab": lab}, results={"models": []})
+    return project, path, proc, lab
+
+
+def test_portable_project_embeds_and_extracts_verified_copies(tmp_path, project):
+    project, path, proc, lab = _portable(tmp_path, project)
+    manifest = persistence.read_manifest(path)
+    assert manifest["storage"] == "portable"
+    assert {e["entry"] for e in manifest["embedded"]} == {
+        "data/process/tower_process.csv",
+        "data/lab/lab_results.xlsx",
+    }
+    assert load_project(path) == load_project(path)  # project JSON still loads normally
+    assert persistence.load_results(path) == {"models": []}
+    out = persistence.extract_embedded(path, tmp_path / "cache")
+    assert out["process"].read_bytes() == proc.read_bytes()
+    assert out["lab"].read_bytes() == lab.read_bytes()
+    assert persistence.extract_embedded(path, tmp_path / "cache") == out  # idempotent
+
+
+def test_portable_refuses_changed_source_and_tampered_archive(tmp_path, project):
+    project, path, proc, _lab = _portable(tmp_path, project)
+    proc.write_text("changed", encoding="utf-8")
+    with pytest.raises(ProjectFileError, match="changed since it was imported"):
+        save_project(project, tmp_path / "again.imsproj", embed={"process": proc})
+    tampered = tmp_path / "tampered.imsproj"
+    with zipfile.ZipFile(path) as src, zipfile.ZipFile(tampered, "w") as dst:
+        for info in src.infolist():
+            data = src.read(info)
+            if info.filename == "data/process/tower_process.csv":
+                data = b"evil"
+            dst.writestr(info.filename, data)
+    with pytest.raises(ProjectFileError, match="checksum"):
+        persistence.extract_embedded(tampered, tmp_path / "cache2")
+
+
+@pytest.mark.parametrize(
+    "name", ["data/../x.csv", "data/a/../../x", "data/a/b/c.csv", "data/.hidden/x", "data/a/.."]
+)
+def test_unsafe_data_entries_rejected(tmp_path, name):
+    path = _write_zip(
+        tmp_path / "x.imsproj",
+        {"manifest.json": _manifest(), "project.json": "{}", name: b"x"},
+    )
+    with pytest.raises(ProjectFileError):
+        load_project(path)
+
+
+def test_reference_projects_have_no_results_by_default(tmp_path, project):
+    path = save_project(project, tmp_path / "r.imsproj") and tmp_path / "r.imsproj"
+    assert persistence.read_manifest(path)["storage"] == "reference"
+    assert persistence.load_results(path) is None
+
+
+def test_recovery_copy_roundtrip(tmp_path, project):
+    from inferential_studio.infrastructure.recovery import (
+        RecoveryWriter,
+        discard_copy,
+        find_recovery_copies,
+    )
+
+    original = tmp_path / "proj" / "p.imsproj"
+    writer = RecoveryWriter()
+    assert writer.write(project, original)
+    copies = find_recovery_copies()
+    assert len(copies) == 1 and copies[0].original_path == original
+    recovered = load_project(copies[0].project_file)
+    # Source paths were rebased so the data files still resolve from the recovery folder.
+    assert resolve_source_path(recovered.sources[0], copies[0].project_file).resolve() == (
+        resolve_source_path(project.sources[0], original).resolve()
+    )
+    discard_copy(copies[0])
+    assert find_recovery_copies() == []

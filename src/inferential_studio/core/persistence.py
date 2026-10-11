@@ -1,9 +1,13 @@
 """Reading and writing ``.imsproj`` project files.
 
-Format (schema version 1, documented in docs/file-formats.md): a ZIP archive containing
+Format (documented in docs/file-formats.md): a ZIP archive containing
 
-    manifest.json   format id, schema version, app and library versions, save time
+    manifest.json   format id, schema version, app and library versions, save time, storage
+                    mode and the list of embedded data files with their SHA-256
     project.json    the :class:`~inferential_studio.core.schemas.Project` as JSON
+    results.json    optional: summary of the last training run (to check reproduction)
+    data/<source id>/<file name>
+                    optional, portable projects only: byte-exact copies of the source files
 
 Security rules (project files are data, never code):
 
@@ -23,6 +27,8 @@ import hashlib
 import json
 import os
 import platform
+import re
+import shutil
 import tempfile
 import zipfile
 from dataclasses import replace
@@ -45,7 +51,13 @@ FORMAT_ID = "inferential-model-studio-project"
 
 MANIFEST_NAME = "manifest.json"
 PROJECT_NAME = "project.json"
-ALLOWED_ENTRIES = frozenset({MANIFEST_NAME, PROJECT_NAME})
+RESULTS_NAME = "results.json"
+ALLOWED_ENTRIES = frozenset({MANIFEST_NAME, PROJECT_NAME, RESULTS_NAME})
+DATA_ENTRY = re.compile(r"^data/[A-Za-z0-9_][A-Za-z0-9_.-]*/[^/\\:*?\"<>|.][^/\\:*?\"<>|]*$")
+SAFE_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+MAX_EMBEDDED_BYTES = 4 * 1024 * 1024 * 1024  # per embedded data file (uncompressed)
+REFERENCE = "reference"
+PORTABLE = "portable"
 
 MAX_JSON_BYTES = 64 * 1024 * 1024  # uncompressed limit per JSON entry
 MAX_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024  # refuse absurd files before opening
@@ -74,8 +86,18 @@ def library_versions() -> dict[str, str]:
     }
 
 
-def save_project(project: Project, path: str | os.PathLike[str]) -> Project:
-    """Atomically save ``project`` to ``path``. Returns the saved copy (with updated timestamp)."""
+def save_project(
+    project: Project,
+    path: str | os.PathLike[str],
+    *,
+    embed: dict[str, str | os.PathLike[str]] | None = None,
+    results: dict[str, Any] | None = None,
+) -> Project:
+    """Atomically save ``project`` to ``path``. Returns the saved copy (with updated timestamp).
+
+    ``embed`` (portable projects): source id -> file to copy into the archive. Each file must
+    match the checksum recorded at import. ``results``: JSON summary of a training run.
+    """
     target = Path(path)
     if target.suffix.lower() != PROJECT_EXTENSION:
         raise ProjectFileError(f"Project files must use the '{PROJECT_EXTENSION}' extension.")
@@ -87,6 +109,26 @@ def save_project(project: Project, path: str | os.PathLike[str]) -> Project:
             f"The project cannot be saved because it is inconsistent: {exc}"
         ) from exc
 
+    embedded = []
+    for source_id, file in (embed or {}).items():
+        file = Path(file)
+        source = next((s for s in project.sources if s.source_id == source_id), None)
+        if source is None or not SAFE_ID.match(source_id):
+            raise ProjectFileError(f"Cannot embed data for unknown source '{source_id}'.")
+        if not file.is_file():
+            raise ProjectFileError(f"Cannot embed '{file}': the file was not found.")
+        digest = sha256_file(file)
+        if source.sha256 is not None and digest != source.sha256:
+            raise ProjectFileError(
+                f"'{file.name}' changed since it was imported; reload it before saving a "
+                "portable project."
+            )
+        name = re.sub(r'[/\\:*?"<>|]', "_", Path(source.path).name) or "data"
+        embedded.append(
+            {"source_id": source_id, "entry": f"data/{source_id}/{name}", "sha256": digest,
+             "size": file.stat().st_size, "file": file}
+        )  # fmt: skip
+
     saved = replace(project, modified_at=utc_now())
     manifest = {
         "format": FORMAT_ID,
@@ -94,6 +136,8 @@ def save_project(project: Project, path: str | os.PathLike[str]) -> Project:
         "app_version": __version__,
         "saved_at": saved.modified_at.isoformat(),
         "libraries": library_versions(),
+        "storage": PORTABLE if embedded else REFERENCE,
+        "embedded": [{k: v for k, v in e.items() if k != "file"} for e in embedded],
     }
     project_json = json.dumps(to_jsonable(saved), indent=2, ensure_ascii=False)
 
@@ -104,6 +148,10 @@ def save_project(project: Project, path: str | os.PathLike[str]) -> Project:
             with zipfile.ZipFile(handle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr(MANIFEST_NAME, json.dumps(manifest, indent=2))
                 archive.writestr(PROJECT_NAME, project_json)
+                if results is not None:
+                    archive.writestr(RESULTS_NAME, json.dumps(results, indent=2, allow_nan=False))
+                for e in embedded:
+                    archive.write(e["file"], e["entry"])
             handle.flush()
             os.fsync(handle.fileno())
         # mkstemp creates owner-only files; give the project ordinary document permissions
@@ -129,8 +177,7 @@ def _silent_unlink(name: str) -> None:
 # --------------------------------------------------------------------------- load
 
 
-def load_project(path: str | os.PathLike[str]) -> Project:
-    """Load and validate a project file. Raises ProjectFileError with a user-facing message."""
+def _open_checked(path: str | os.PathLike[str]) -> Path:
     source = Path(path)
     if not source.is_file():
         raise ProjectFileError(f"Project file '{source}' does not exist.")
@@ -138,7 +185,12 @@ def load_project(path: str | os.PathLike[str]) -> Project:
         raise ProjectFileError(f"'{source.name}' is too large to be a project file.")
     if not zipfile.is_zipfile(source):
         raise ProjectFileError(f"'{source.name}' is not a valid project file (not a ZIP archive).")
+    return source
 
+
+def load_project(path: str | os.PathLike[str]) -> Project:
+    """Load and validate a project file. Raises ProjectFileError with a user-facing message."""
+    source = _open_checked(path)
     try:
         with zipfile.ZipFile(source) as archive:
             entries = _checked_entries(archive)
@@ -155,13 +207,97 @@ def load_project(path: str | os.PathLike[str]) -> Project:
         raise ProjectFileError(f"'{source.name}' contains invalid project data: {exc}") from exc
 
 
+def read_manifest(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """The validated manifest (storage mode, embedded files, versions) of a project file."""
+    source = _open_checked(path)
+    try:
+        with zipfile.ZipFile(source) as archive:
+            entries = _checked_entries(archive)
+            manifest = _read_json(archive, entries, MANIFEST_NAME)
+    except zipfile.BadZipFile as exc:
+        raise ProjectFileError(f"'{source.name}' is damaged and cannot be opened: {exc}.") from exc
+    _check_manifest(manifest, source.name)
+    embedded = manifest.get("embedded", [])
+    if not isinstance(embedded, list):
+        raise ProjectFileError(f"'{source.name}' has an invalid list of embedded files.")
+    for e in embedded:
+        if (
+            not isinstance(e, dict)
+            or not isinstance(e.get("entry"), str)
+            or not DATA_ENTRY.match(e["entry"])
+            or e["entry"] not in entries
+            or not SAFE_ID.match(str(e.get("source_id", "")))
+            or not isinstance(e.get("sha256"), str)
+        ):
+            raise ProjectFileError(f"'{source.name}' lists an invalid embedded data file.")
+    return manifest
+
+
+def load_results(path: str | os.PathLike[str]) -> dict[str, Any] | None:
+    """The saved training-results summary, or None when the project has none."""
+    source = _open_checked(path)
+    with zipfile.ZipFile(source) as archive:
+        entries = _checked_entries(archive)
+        if RESULTS_NAME not in entries:
+            return None
+        data = _read_json(archive, entries, RESULTS_NAME)
+    return data if isinstance(data, dict) else None
+
+
+def extract_embedded(
+    path: str | os.PathLike[str], dest_dir: str | os.PathLike[str]
+) -> dict[str, Path]:
+    """Copy a portable project's data files to ``dest_dir`` (verified). Source id -> file path.
+
+    Only entries listed in the manifest are written, under names built from validated parts;
+    sizes are enforced while copying and every file must match its recorded SHA-256.
+    """
+    manifest = read_manifest(path)
+    out: dict[str, Path] = {}
+    dest_root = Path(dest_dir).resolve()
+    with zipfile.ZipFile(path) as archive:
+        for e in manifest.get("embedded", []):
+            info = archive.getinfo(e["entry"])
+            if info.file_size > MAX_EMBEDDED_BYTES:
+                raise ProjectFileError(f"Embedded file '{e['entry']}' is too large.")
+            _, source_id, name = e["entry"].split("/", 2)
+            folder = dest_root / source_id
+            target = (folder / name).resolve()
+            if dest_root not in target.parents:
+                raise ProjectFileError(f"Embedded file '{e['entry']}' has an unsafe name.")
+            if target.is_file() and sha256_file(target) == e["sha256"]:
+                out[e["source_id"]] = target  # already extracted earlier
+                continue
+            folder.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_suffix(target.suffix + ".part")
+            digest = hashlib.sha256()
+            written = 0
+            with archive.open(info) as src, open(tmp, "wb") as dst:
+                while chunk := src.read(1024 * 1024):
+                    written += len(chunk)
+                    if written > info.file_size:
+                        dst.close()
+                        tmp.unlink(missing_ok=True)
+                        raise ProjectFileError(f"Embedded file '{e['entry']}' is corrupt.")
+                    digest.update(chunk)
+                    dst.write(chunk)
+            if digest.hexdigest() != e["sha256"]:
+                tmp.unlink(missing_ok=True)
+                raise ProjectFileError(
+                    f"Embedded file '{e['entry']}' does not match its checksum; the project is damaged."
+                )
+            shutil.move(tmp, target)
+            out[e["source_id"]] = target
+    return out
+
+
 def _checked_entries(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     entries: dict[str, zipfile.ZipInfo] = {}
     for info in archive.infolist():
         name = info.filename
         if name.startswith(("/", "\\")) or ".." in name.split("/") or "\\" in name or ":" in name:
             raise ProjectFileError(f"Project file contains an unsafe entry name '{name}'.")
-        if name not in ALLOWED_ENTRIES:
+        if name not in ALLOWED_ENTRIES and not DATA_ENTRY.match(name):
             raise ProjectFileError(f"Project file contains an unexpected entry '{name}'.")
         if name in entries:
             raise ProjectFileError(f"Project file contains duplicate entry '{name}'.")
@@ -219,8 +355,13 @@ def _v3_to_v4(project_data: Any) -> Any:
     return project_data
 
 
+def _v4_to_v5(project_data: Any) -> Any:
+    """v5 added optional archive entries (embedded data, results); project JSON unchanged."""
+    return project_data
+
+
 # Map "from version" -> function converting project JSON to version + 1.
-_MIGRATIONS: dict[int, Any] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4}
+_MIGRATIONS: dict[int, Any] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5}
 
 
 def migrate(project_data: Any, from_version: int) -> Any:

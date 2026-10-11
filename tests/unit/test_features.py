@@ -291,3 +291,24 @@ def test_synthetic_column_deadtime_recovered():
     best = min(rmse, key=rmse.get)
     assert 12 * 60 <= best <= 28 * 60
     assert rmse[best] < 0.5 * rmse[0]
+
+
+@pytest.mark.parametrize("agg", [Aggregation.MEDIAN, Aggregation.STD, Aggregation.MEAN,
+                                 Aggregation.MIN, Aggregation.MAX, Aggregation.LAST])  # fmt: skip
+def test_vectorised_windows_match_direct_computation(agg):
+    rng = np.random.default_rng(9)
+    n = 3000
+    keep = rng.random(n) > 0.3  # irregular sampling: windows hold different numbers of values
+    idx = pd.date_range(T0, periods=n, freq="1min")[keep]
+    x = pd.Series(rng.normal(size=keep.sum()), index=idx, name="x")
+    spec = FeatureSpec("x", window_s=1200, deadtime_s=300, aggregation=agg, min_coverage=0)
+    times = pd.date_range(T0 + pd.Timedelta(hours=1), periods=150, freq="17min")
+    res = aggregate_windows(process_signal(x, spec), times.as_unit("ns").asi8, spec)
+    fn = {Aggregation.MEDIAN: np.median, Aggregation.MEAN: np.mean, Aggregation.MIN: np.min,
+          Aggregation.MAX: np.max, Aggregation.LAST: lambda v: v[-1],
+          Aggregation.STD: lambda v: v.std(ddof=1) if v.size > 1 else np.nan}[agg]  # fmt: skip
+    for k, t in enumerate(times):
+        lo, hi = t - pd.Timedelta(seconds=1500), t - pd.Timedelta(seconds=300)
+        window = x[(x.index > lo) & (x.index <= hi)].to_numpy()
+        expected = fn(window) if window.size else np.nan
+        assert res.value[k] == pytest.approx(expected, rel=1e-12, nan_ok=True)

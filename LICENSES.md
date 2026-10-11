@@ -15,7 +15,7 @@ v3 incorporates the GPL v3 by reference).
 Qt itself includes third-party components with their own notices; see
 https://doc.qt.io/qt-6/licenses-used-in-qt.html.
 
-## Runtime dependency inventory (v0.2.0)
+## Runtime dependency inventory (v0.5.0)
 
 Generated with `packaging/license_inventory.py` from the release environment.
 

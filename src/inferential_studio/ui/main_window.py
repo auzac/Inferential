@@ -8,7 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import PySide6
-from PySide6.QtCore import QSize, Qt, QUrl, Slot
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QToolButton,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -37,12 +36,19 @@ from inferential_studio.core.persistence import PROJECT_EXTENSION, ProjectFileEr
 from inferential_studio.core.quality import run_detectors
 from inferential_studio.core.schemas import Project, SchemaError, SourceKind
 from inferential_studio.infrastructure.logging_config import LOG_FILE_NAME
-from inferential_studio.infrastructure.paths import log_dir
+from inferential_studio.infrastructure.paths import cache_dir, log_dir
+from inferential_studio.infrastructure.recovery import (
+    RecoveryWriter,
+    discard_copy,
+    find_recovery_copies,
+)
 from inferential_studio.infrastructure.settings import AppSettings, save_settings
 from inferential_studio.infrastructure.workers import TaskManager
+from inferential_studio.ui.help import GuideDialog, HelpPanel
 from inferential_studio.ui.import_wizard import ImportPlan, ImportWizard
 from inferential_studio.ui.pages.cleaning_page import CleaningPage
 from inferential_studio.ui.pages.eda_page import EdaPage
+from inferential_studio.ui.pages.export_page import ExportPage
 from inferential_studio.ui.pages.import_page import ImportPage
 from inferential_studio.ui.pages.model_setup_page import ModelSetupPage
 from inferential_studio.ui.pages.processing_page import ProcessingPage
@@ -84,6 +90,14 @@ class MainWindow(QMainWindow):
         self.session.dirty_changed.connect(self.setWindowModified)
         self.session.path_changed.connect(lambda _p: self._update_title())
         self.tasks.busy_changed.connect(self._on_busy_changed)
+        self._reproduce_pending = False  # reopened project with saved results: re-train once
+        self.session.features_changed.connect(self._maybe_reproduce)
+        # Crash recovery: a copy of unsaved work every minute.
+        self.recovery = RecoveryWriter()
+        self._recovery_timer = QTimer(self)
+        self._recovery_timer.setInterval(60_000)
+        self._recovery_timer.timeout.connect(self._write_recovery)
+        self._recovery_timer.start()
         self.session.new(Project(display_timezone=settings.display_timezone))
 
     # ------------------------------------------------------------------ construction
@@ -124,9 +138,17 @@ class MainWindow(QMainWindow):
             "Import process (historian) or lab data from CSV or Excel",
         )
         self.act_export = action(
-            "&Export…", lambda: None, None, "Export predictions, report and model (Milestone 5)"
+            "&Export…",
+            lambda: self.sidebar.setCurrentRow(self._stage_row("export")),
+            QKeySequence("Ctrl+E"),
+            "Export predictions, the model card and the model file",
         )
-        self.act_export.setEnabled(False)
+        self.act_save_portable = action(
+            "Save &Portable Copy…",
+            self._save_portable_dialog,
+            None,
+            "Save a project file that contains the data files too (for sharing or archiving)",
+        )
         self.act_exit = action("E&xit", self.close, QKeySequence.StandardKey.Quit)
         self.act_project = action(
             "&Project Settings…",
@@ -144,6 +166,12 @@ class MainWindow(QMainWindow):
             "Open &Log Folder", self._open_log_folder, None, "Show the application log files"
         )
         self.act_about = action(f"&About {APP_NAME}", self._about)
+        self.act_guide = action(
+            "&User Guide",
+            self.show_guide,
+            QKeySequence.StandardKey.HelpContents,
+            "Open the user guide",
+        )
         self.act_undo = self.undo_stack.createUndoAction(self, "&Undo")
         self.act_undo.setShortcut(QKeySequence.StandardKey.Undo)
         self.act_redo = self.undo_stack.createRedoAction(self, "&Redo")
@@ -156,7 +184,7 @@ class MainWindow(QMainWindow):
         self.recent_menu = file_menu.addMenu("Open &Recent")
         self.recent_menu.aboutToShow.connect(self._populate_recent)
         file_menu.addSeparator()
-        file_menu.addActions([self.act_save, self.act_save_as])
+        file_menu.addActions([self.act_save, self.act_save_as, self.act_save_portable])
         file_menu.addSeparator()
         file_menu.addActions([self.act_import, self.act_export])
         file_menu.addSeparator()
@@ -168,7 +196,10 @@ class MainWindow(QMainWindow):
         tools_menu = bar.addMenu("&Tools")
         tools_menu.addActions([self.act_settings, self.act_logs])
         help_menu = bar.addMenu("&Help")
+        help_menu.addAction(self.act_guide)
+        help_menu.addSeparator()
         help_menu.addAction(self.act_about)
+        self.help_menu = help_menu
         # Frequent actions sit on the right end of the menu bar itself, so the
         # window keeps a single command row instead of a menu bar plus a toolbar.
         corner = QWidget(bar)
@@ -234,6 +265,8 @@ class MainWindow(QMainWindow):
                 page.train_requested.connect(self.run_training)
             elif stage.key == "validation":
                 page = ValidationPage(stage, self.session)
+            elif stage.key == "export":
+                page = ExportPage(stage, self.session, self.tasks, self.undo_stack, self.settings)
             else:
                 page = PlaceholderPage(stage)
             self.pages[stage.key] = page
@@ -243,7 +276,7 @@ class MainWindow(QMainWindow):
             # to expand QListWidget's cached size hints.
             item.setSizeHint(QSize(0, 40))
             item.setData(Qt.ItemDataRole.UserRole, stage.key)
-            item.setToolTip(f"{stage.goal}\n(Delivered in Milestone {stage.milestone})")
+            item.setToolTip(stage.goal)
             self.sidebar.addItem(item)
         self.sidebar.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.sidebar.setCurrentRow(0)
@@ -256,27 +289,24 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(splitter)
 
     def _build_properties_panel(self) -> None:
-        dock = QDockWidget("Properties", self)
+        """Right-hand dock with short, stage-specific guidance (F1 opens the full guide)."""
+        dock = QDockWidget("Help", self)
         dock.setObjectName("propertiesDock")
         dock.setAllowedAreas(
             Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.LeftDockWidgetArea
         )
-        panel = QWidget(dock)
-        panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(8, 8, 8, 8)
-
-        # The hovered trend values live on the trend pages themselves, below the
-        # variable selection, so this dock stays a plain placeholder for now.
-        placeholder = QLabel("Select a variable, rule or model to see its settings here.")
-        placeholder.setWordWrap(True)
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignTop)
-        placeholder.setMargin(4)
-        panel_layout.addWidget(placeholder, 1)
-
-        dock.setWidget(panel)
+        self.help_panel = HelpPanel(dock)
+        dock.setWidget(self.help_panel)
         dock.setMinimumWidth(220)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
         self.properties_dock = dock
+        panel = dock.toggleViewAction()
+        panel.setText("Help &Panel")
+        self.help_menu.insertAction(self.act_about, panel)
+        self.sidebar.currentRowChanged.connect(
+            lambda row: self.help_panel.show_stage(STAGES[row].key) if row >= 0 else None
+        )
+        self.help_panel.show_stage(STAGES[max(self.sidebar.currentRow(), 0)].key)
 
     def _build_status_bar(self) -> None:
         status = self.statusBar()
@@ -352,17 +382,20 @@ class MainWindow(QMainWindow):
             return
         self.session.new(Project(display_timezone=self.settings.display_timezone))
         self.undo_stack.clear()
+        self.recovery.discard()
 
     def open_project_file(self, path: str | Path) -> bool:
         try:
-            self.session.open(path)
-        except ProjectFileError as exc:
+            self.session.open(path, cache_dir=cache_dir())
+        except (ProjectFileError, OSError) as exc:
             log.warning("Could not open project %s: %s", path, exc)
             self.show_error("Cannot open project", str(exc))
             return False
         self.undo_stack.clear()
         self._remember(path)
-        log.info("Opened project %s", path)
+        log.info("Opened project %s (%s)", path, self.session.storage)
+        self._reproduce_pending = self.session.saved_results is not None
+        self.recovery.discard()
         self.load_data()
         return True
 
@@ -376,18 +409,27 @@ class MainWindow(QMainWindow):
         self._load_generation += 1
         generation = self._load_generation
         target = project
+        project_path = self.session.path
+        if self.session.embedded_paths:  # portable project: read the verified extracted copies
+            target = replace(
+                project,
+                sources=[
+                    replace(s, path=str(self.session.embedded_paths.get(s.source_id, s.path)))
+                    for s in project.sources
+                ],
+            )
         if only is not None:
             target = Project(
                 name=project.name,
                 display_timezone=project.display_timezone,
-                sources=[s for s in project.sources if s.source_id in only],
+                sources=[s for s in target.sources if s.source_id in only],
                 variables=[v for v in project.variables if v.source_id in only],
             )
         self.tasks.submit(
             "Loading project data",
             load_project_data,
             target,
-            self.session.path,
+            project_path,
             verify_checksum=verify_checksum,
             on_result=lambda data: self._data_loaded(data, generation, partial=only is not None),
             on_error=lambda msg, details: self.show_error("Cannot load data", msg, details),
@@ -536,7 +578,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ training
 
     @Slot()
-    def run_training(self) -> None:
+    def run_training(self, *, reproduce: bool = False) -> None:
         """Train every enabled model in the background on the current aligned features."""
         session = self.session
         fm = session.features
@@ -548,19 +590,27 @@ class MainWindow(QMainWindow):
         config = session.project.modelling
 
         def done(run) -> None:  # noqa: ANN001
-            session.set_training(run)
+            session.set_training(run, reproduce=reproduce)
             if session.features is not fm or session.project.modelling != config:
                 session._invalidate_training()  # inputs changed while training
-            self.sidebar.setCurrentRow(self._stage_row("training"))
+            if not reproduce:
+                self.sidebar.setCurrentRow(self._stage_row("training"))
 
         self.tasks.submit(
-            "Training models",
+            "Reproducing saved results" if reproduce else "Training models",
             train_models,
             fm,
             config,
             on_result=done,
             on_error=lambda msg, details: self.show_error("Training failed", msg, details),
         )
+
+    @Slot()
+    def _maybe_reproduce(self) -> None:
+        """A reopened project had saved results: re-train once and compare (deterministic)."""
+        if self._reproduce_pending and self.session.features is not None:
+            self._reproduce_pending = False
+            self.run_training(reproduce=True)
 
     def _stage_row(self, key: str) -> int:
         return [s.key for s in STAGES].index(key)
@@ -575,18 +625,63 @@ class MainWindow(QMainWindow):
         if answer == QMessageBox.StandardButton.Yes:
             self.session.remove_source(source_id)
 
-    def save_project_to(self, path: str | Path) -> bool:
+    def save_project_to(self, path: str | Path, *, portable: bool | None = None) -> bool:
         path = Path(path)
         if path.suffix.lower() != PROJECT_EXTENSION:
             path = path.with_suffix(PROJECT_EXTENSION)
         try:
-            self.session.save(path)
+            self.session.save(path, portable=portable)
         except (ProjectFileError, ValueError) as exc:
             self.show_error("Cannot save project", str(exc))
             return False
         self._remember(path)
-        self.statusBar().showMessage(f"Saved {path.name}", 4000)
+        self.recovery.discard()
+        kind = "portable project (data included)" if self.session.storage == "portable" else ""
+        self.statusBar().showMessage(f"Saved {path.name} {kind}".strip(), 4000)
         return True
+
+    @Slot()
+    def _save_portable_dialog(self) -> bool:
+        start = str(
+            Path(self.settings.last_directory or Path.home())
+            / f"{self.session.project.name} (portable){PROJECT_EXTENSION}"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save portable project (data included)", start, PROJECT_FILTER
+        )
+        return self.save_project_to(path, portable=True) if path else False
+
+    # ------------------------------------------------------------------ crash recovery
+
+    @Slot()
+    def _write_recovery(self) -> None:
+        if self.session.dirty and (self.session.project.sources or self.session.project.notes):
+            self.recovery.write(self.session.project, self.session.path)
+
+    def offer_recovery(self) -> None:
+        """Called once at start-up: offer copies left behind by a crash or power loss."""
+        copies = find_recovery_copies()
+        for copy in sorted(copies, key=lambda c: c.saved_at, reverse=True):
+            where = str(copy.original_path) if copy.original_path else "a project never saved"
+            answer = QMessageBox.question(
+                self,
+                "Recover unsaved work?",
+                f"{APP_NAME} did not close normally. Unsaved changes to '{copy.name}' ({where}) "
+                f"from {copy.saved_at:%Y-%m-%d %H:%M} UTC were kept.\n\nRecover them now? "
+                "Choosing No deletes this recovery copy.",
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                try:
+                    self.session.open_recovered(copy.project_file, copy.original_path)
+                except ProjectFileError as exc:
+                    self.show_error("Cannot recover", str(exc))
+                    discard_copy(copy)
+                    continue
+                self.undo_stack.clear()
+                discard_copy(copy)
+                self.load_data()
+                break
+            discard_copy(copy)
 
     @Slot()
     def _open_dialog(self) -> None:
@@ -693,6 +788,10 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir())))
 
     @Slot()
+    def show_guide(self) -> None:
+        GuideDialog(self).exec()
+
+    @Slot()
     def _about(self) -> None:
         QMessageBox.about(
             self,
@@ -718,4 +817,5 @@ class MainWindow(QMainWindow):
             if not self.tasks.wait_for_done(5000):
                 log.warning("Background tasks did not stop within 5 s at shutdown")
         save_settings(self.settings)
+        self.recovery.discard()  # closed normally: nothing to recover
         event.accept()

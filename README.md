@@ -5,11 +5,13 @@ inferential models (soft sensors), starting with distillation columns.
 
 Python · PySide6 (Qt 6) · PyQtGraph · pandas · scikit-learn. No cloud services, no telemetry.
 
-> **Status: v0.4.0 — Milestones 3 and 4 (alignment, modelling and validation).** Import with
-> a timestamp wizard, raw EDA, cleaning with reviewable flags, variable selection with VIF,
-> per-predictor deadtime/window/filter alignment to lab samples, MLR / PLS / PCR / Ridge with
-> chronological splits and time-aware CV, interpretation and validation plots. Export, model
-> artifacts and the report arrive in Milestone 5. See the [user guide](docs/user-guide.md).
+> **Status: v0.5.0 — Milestone 5 (release candidate for v1.0.0).** All nine stages work:
+> import, raw EDA, cleaning with reviewable flags, variable selection, per-predictor alignment to
+> lab samples, MLR / PLS / PCR / Ridge with chronological splits and time-aware CV, validation,
+> and export (HTML model card, predictions, JSON model file, batch prediction). Projects can be
+> portable (data embedded), reproduce their saved results on reopening and recover after a crash.
+> Remaining gate for v1.0.0: build and test the installer on a clean Windows PC
+> ([packaging](docs/packaging.md)). See the [user guide](docs/user-guide.md).
 
 ## Quick start (Windows, PowerShell)
 
@@ -73,6 +75,9 @@ src/inferential_studio/
     diagnostics.py        raw-vs-cleaned statistics, aligned correlations, VIF
     splits.py             chronological train/validation/test split, purge gap, time-aware CV
     models.py             MLR/PLS/PCR/Ridge pipelines, tuning, interpretation, metrics
+    artifacts.py          JSON model files (.imsmodel), batch prediction, saved-results checks
+    exports.py            predictions / feature matrix / batch results to CSV or Excel
+    report.py, svg.py     self-contained HTML model card with inline SVG charts
     synthetic.py          synthetic distillation dataset with ground truth
     tasks.py              progress/cancellation primitives for long-running functions
   infrastructure/         logging, per-user settings, paths, background TaskManager (Qt)
@@ -82,7 +87,8 @@ tests/
   gui/                    pytest-qt: every working page, background workers, undo
   integration/            import → clean → align → train → save → reload with identical results
 examples/synthetic_distillation/   artificial data + sample project
-packaging/                PyInstaller spec, Windows build script, license inventory
+packaging/                PyInstaller spec, Windows build + installer (Inno Setup) scripts,
+                          installer smoke test, icon generator, license inventory
 docs/                     methodology conventions, file formats, packaging
 licenses/                 LGPL/GPL v3 texts shipped with the application
 ```
@@ -102,11 +108,12 @@ licenses/                 LGPL/GPL v3 texts shipped with the application
 
 ## Documentation
 
+- [STRUCTURE.md](STRUCTURE.md) — what each file does and where to find things
 - [docs/user-guide.md](docs/user-guide.md) — how to use the application
 - [docs/methodology.md](docs/methodology.md) — time, import, exclusion, alignment, split, model and metric definitions
 - [docs/benchmarks.md](docs/benchmarks.md) — measured import, statistics, alignment and training performance
-- [docs/file-formats.md](docs/file-formats.md) — project file and example data formats
-- [docs/packaging.md](docs/packaging.md) — Windows build, licensing obligations
+- [docs/file-formats.md](docs/file-formats.md) — project, model file, export and example data formats
+- [docs/packaging.md](docs/packaging.md) — Windows build, installer, smoke tests, release checklist, licensing
 - [LICENSES.md](LICENSES.md) — third-party notices
 - [CHANGELOG.md](CHANGELOG.md)
 

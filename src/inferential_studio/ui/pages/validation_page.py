@@ -161,7 +161,7 @@ class ValidationPage(StagePage):
     def refresh(self) -> None:
         run = self._session.training
         revealed = self._session.test_revealed
-        lines = []
+        lines = [self._session.reproduction] if self._session.reproduction else []
         if self._session.training_stale:
             lines.append("Settings or data changed since training: these results are out of date.")
         if revealed:
