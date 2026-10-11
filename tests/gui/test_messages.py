@@ -7,7 +7,7 @@ import pytest
 from inferential_studio.infrastructure.settings import AppSettings
 from inferential_studio.ui.main_window import MainWindow
 from inferential_studio.ui.messages import Level, MessageCenter
-from inferential_studio.ui.widgets.message_panel import PANEL_HEIGHT, MessagePanel
+from inferential_studio.ui.widgets.message_panel import PANEL_HEIGHT, MessagePanel, panel_height
 
 pytestmark = pytest.mark.gui
 
@@ -58,5 +58,6 @@ def test_errors_go_to_the_panel_not_a_dialog(qtbot):
     msg = w.session.messages.events[0]
     assert msg.level is Level.ERROR and msg.text.startswith("Cannot save project")
     assert msg.details == "trace"
-    assert w.message_panel.height() == PANEL_HEIGHT
+    assert w.message_panel.height() == panel_height(w.message_panel.rows)  # fixed
+    assert w.message_panel.rows in (3, 4)  # one row less on short screens
     assert w.session.messages.condition("training.state") is not None  # stages 7–9 guidance

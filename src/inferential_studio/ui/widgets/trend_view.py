@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import warnings
 from dataclasses import dataclass
+from html import escape
 
 import numpy as np
 import pyqtgraph as pg
@@ -46,6 +47,9 @@ POINTS_MAX = 5000  # markers drawn for sparse point series (lab samples)
 HIGHLIGHT_COLOUR = (0, 114, 178)  # drag-to-zoom band, matching the cleaning page's range
 MIN_DRAG_PX = 6  # shorter drags are treated as clicks, not zooms
 PIN_COLOUR = "#0072B2"  # vertical line marking the pinned point in time
+HEADER_HEIGHT = 16  # px of the per-chart name header
+HEADER_TEXT = "#3b4754"
+HEADER_MUTED = "#8a96a3"
 
 
 @dataclass
@@ -273,8 +277,8 @@ class TrendView(QWidget):
         tidy_plot(plot)  # no PyQtGraph menu or "A" button (Fit all is the toolbar's)
         plot.showGrid(x=True, y=True, alpha=0.15)
         plot.getAxis("left").setWidth(AXIS_WIDTH)
-        plot.addLegend(offset=(5, 5), labelTextSize="8pt", brush=(255, 255, 255, 210))
-        # Names are in the legend; the axis shows only units to keep labels short.
+        # Names sit in a slim header above each chart (never on top of the data); the axis
+        # shows only units to keep labels short.
         plot.setLabel("left", units_label)
         vline = pg.InfiniteLine(
             angle=90, movable=False, pen=pg.mkPen("#888888", style=Qt.PenStyle.DashLine)
@@ -463,6 +467,25 @@ class TrendView(QWidget):
                 plot.addItem(lo)
                 plot.addItem(hi)
                 items[name] = (lo, hi, signature)
+        self._set_header(plot, group)
+
+    def _set_header(self, plot: pg.PlotItem, group: list[TrendSeries]) -> None:
+        """One-line chart header: a colour key and the name of each series, left-aligned."""
+        parts = []
+        for s in group:
+            mark = "●" if s.points else "━"
+            units = (
+                f" <span style='color:{HEADER_MUTED}'>[{escape(s.units)}]</span>" if s.units else ""
+            )
+            parts.append(
+                f"<span style='color:{self._colour_for(s.name)}'>{mark}</span>&nbsp;"
+                f"{escape(s.name)}{units}"
+            )
+        plot.setTitle(
+            "&nbsp;&nbsp;&nbsp;".join(parts), size="8pt", color=HEADER_TEXT, justify="left"
+        )
+        plot.titleLabel.setMaximumHeight(HEADER_HEIGHT)
+        plot.layout.setRowFixedHeight(0, HEADER_HEIGHT)
 
     @staticmethod
     def _subsample_points(s: TrendSeries) -> tuple[np.ndarray, np.ndarray]:

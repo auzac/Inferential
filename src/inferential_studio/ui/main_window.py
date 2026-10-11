@@ -9,7 +9,14 @@ from pathlib import Path
 
 import PySide6
 from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Slot
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence, QUndoStack
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QDesktopServices,
+    QGuiApplication,
+    QKeySequence,
+    QUndoStack,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDockWidget,
@@ -62,11 +69,12 @@ from inferential_studio.ui.project_dialog import ProjectSettingsDialog
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.settings_dialog import SettingsDialog
 from inferential_studio.ui.stages import STAGES
-from inferential_studio.ui.widgets.message_panel import MessagePanel
+from inferential_studio.ui.widgets.message_panel import ROWS_COMPACT, ROWS_VISIBLE, MessagePanel
 from inferential_studio.ui.widgets.task_progress import TaskProgressWidget
 
 log = logging.getLogger(__name__)
 PROJECT_FILTER = f"Inferential Model Studio project (*{PROJECT_EXTENSION})"
+COMPACT_SCREEN_HEIGHT = 900  # px available; below this the message panel shows one row less
 
 
 class MainWindow(QMainWindow):
@@ -335,7 +343,11 @@ class MainWindow(QMainWindow):
 
     def _build_message_panel(self) -> None:
         """Fixed-height message log along the bottom of the window (never moves page content)."""
-        self.message_panel = MessagePanel(self.session.messages)
+        screen = QGuiApplication.primaryScreen()
+        short = screen is not None and screen.availableGeometry().height() < COMPACT_SCREEN_HEIGHT
+        self.message_panel = MessagePanel(
+            self.session.messages, rows=ROWS_COMPACT if short else ROWS_VISIBLE
+        )
         dock = QDockWidget("Messages", self)
         dock.setObjectName("messageDock")
         dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)

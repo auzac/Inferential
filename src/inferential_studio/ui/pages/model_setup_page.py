@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QDateTimeEdit,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -53,6 +54,7 @@ from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.theme import mark_primary
+from inferential_studio.ui.widgets.flow_layout import flow_row
 from inferential_studio.ui.widgets.plots import (
     SPLIT_COLOURS,
     SPLIT_NAMES,
@@ -193,12 +195,9 @@ class ModelSetupPage(StagePage):
         for r, row in enumerate(self.rows.values()):
             grid.addWidget(row.enabled, 2 * r, 0)
             grid.addWidget(row.mode, 2 * r, 1)
-            params = QHBoxLayout()
-            params.setContentsMargins(24, 0, 0, 6)
-            for w in row.widgets()[2:]:
-                params.addWidget(w)
-            params.addStretch(1)
-            grid.addLayout(params, 2 * r + 1, 0, 1, 2)
+            params = flow_row(*row.widgets()[2:])  # wraps on narrow windows
+            params.layout().setContentsMargins(24, 0, 0, 6)
+            grid.addWidget(params, 2 * r + 1, 0, 1, 2)
             for w in row.widgets():
                 self._watch(w)
             row.mode.currentIndexChanged.connect(lambda _i, rr=row: rr._sync_enabled())
@@ -234,7 +233,11 @@ class ModelSetupPage(StagePage):
         self.cv_kind.addItem("Blocked k-fold (contiguous blocks)", CvKind.BLOCKED.value)
         self.cv_folds = QSpinBox()
         self.cv_folds.setRange(2, 20)
-        self.one_se = QCheckBox("Prefer the simplest setting within one standard error")
+        self.one_se = QCheckBox("Prefer the simplest setting within 1 SE")
+        self.one_se.setToolTip(
+            "One-standard-error rule: choose the simplest setting (fewest components, largest "
+            "alpha) whose mean CV error is within one standard error of the best."
+        )
         for w in (self.train_pct, self.val_pct, self.train_end, self.test_start, self.auto_purge,
                   self.purge, self.cv_kind, self.cv_folds, self.one_se):  # fmt: skip
             self._watch(w)
@@ -243,26 +246,24 @@ class ModelSetupPage(StagePage):
         self._split_form = form
         form.addRow("Scaling", self.scaling)
         form.addRow("Split", self.mode)
-        self.fraction_row = QWidget()
-        fr = QHBoxLayout(self.fraction_row)
-        fr.setContentsMargins(0, 0, 0, 0)
-        fr.addWidget(self.train_pct)
-        fr.addWidget(self.val_pct)
         self.test_pct = QLabel()
-        fr.addWidget(self.test_pct)
+        self.fraction_row = flow_row(self.train_pct, self.val_pct, self.test_pct)
         form.addRow("Shares", self.fraction_row)
-        self.dates_row = QWidget()
-        dr = QHBoxLayout(self.dates_row)
-        dr.setContentsMargins(0, 0, 0, 0)
-        dr.addWidget(QLabel("validation from"))
-        dr.addWidget(self.train_end)
-        dr.addWidget(QLabel("final test from"))
-        dr.addWidget(self.test_start)
+
+        def labelled(text: str, w: QWidget) -> QWidget:
+            box = QWidget()  # label and field stay together when the row wraps
+            bl = QHBoxLayout(box)
+            bl.setContentsMargins(0, 0, 0, 0)
+            bl.addWidget(QLabel(text))
+            bl.addWidget(w)
+            return box
+
+        self.dates_row = flow_row(
+            labelled("validation from", self.train_end),
+            labelled("final test from", self.test_start),
+        )
         form.addRow("Boundaries", self.dates_row)
-        prow = QHBoxLayout()
-        prow.addWidget(self.auto_purge)
-        prow.addWidget(self.purge)
-        form.addRow("Purge gap", prow)
+        form.addRow("Purge gap", flow_row(self.auto_purge, self.purge))
         form.addRow("CV (training only)", self.cv_kind)
         form.addRow("CV folds", self.cv_folds)
         form.addRow("", self.one_se)
@@ -288,11 +289,16 @@ class ModelSetupPage(StagePage):
         ll.addStretch(1)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(left)
+        scroll.setMinimumWidth(left.minimumSizeHint().width() + 14)  # never clipped sideways
 
         # -- split preview ------------------------------------------------------------
         self.split_plot = plot_widget(
-            "Lab samples by period", time_axis=session.project.display_timezone
+            "Lab samples by period",
+            time_axis=session.project.display_timezone,
+            empty_text="No model-eligible lab samples yet: choose a target and predictors first.",
         )
         legend(self.split_plot, "bottom-right")
         right = QWidget()
@@ -308,7 +314,8 @@ class ModelSetupPage(StagePage):
         lp.addWidget(self.train_button)  # the main action stays visible, outside the scroll area
         split.addWidget(left_panel)
         split.addWidget(right)
-        split.setSizes([600, 560])
+        split.setSizes([560, 600])
+        split.setChildrenCollapsible(False)
         self.body.addWidget(split, 1)
 
         self._apply_timer = QTimer(self)

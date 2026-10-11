@@ -235,7 +235,10 @@ def test_trend_view_right_click_opens_standard_chart_menu(qtbot, monkeypatch):
 
 def test_cursor_readout_locks_on_selected_point():
     box = CursorReadout()
-    assert box.minimumHeight() == box.maximumHeight() == 220  # static, taller than before
+    # 220 px when there is room, down to 110 px on short screens; never sized by its content.
+    assert (box.minimumHeight(), box.maximumHeight(), box.sizeHint().height()) == (110, 220, 220)
+    box.show_hover("t0", {f"V{i}": "1" for i in range(40)})
+    assert box.sizeHint().height() == 220
     box.show_hover("t1", {"A": "1"})
     assert "t1" in box.time_label.text() and box.title() == "At cursor"
     box.show_point("t2", {"A": "2"})
@@ -261,24 +264,33 @@ def test_table_numbers_are_readable():
     assert format_value(True) == "Yes" and format_value(float("nan")) == ""
 
 
-def test_plot_placeholder_hides_axes_until_data(qtbot):
+def test_charts_show_a_message_until_they_hold_data(qtbot):
     from inferential_studio.ui.widgets.plots import (
-        clear_placeholder,
+        EMPTY_TEXT,
+        chart_item,
         legend,
         plot_widget,
         show_placeholder,
     )
 
-    plot = plot_widget()
+    plot = plot_widget("Residual vs predicted")
     qtbot.addWidget(plot)
     legend(plot)
-    show_placeholder(plot, "Nothing yet")
-    item = plot.getPlotItem()
+    item = chart_item(plot)
+    # A new chart is empty: message instead of bare 0-1 axes, no legend box.
+    assert item.is_empty and item.empty_text == EMPTY_TEXT
     assert not item.getAxis("left").isVisible() and not item.legend.isVisible()
-    assert plot.property("placeholder") == "Nothing yet"
-    clear_placeholder(plot)
+    plot.addItem(pg.InfiniteLine(0.5))  # reference lines alone are not data
+    plot.plot([], [])
+    assert item.is_empty
+    plot.plot([0, 1, 2], [1, 3, 2], name="data")
+    assert not item.is_empty
     assert item.getAxis("left").isVisible() and item.legend.isVisible()
-    assert plot.property("placeholder") == ""
+    assert item.vb.autoRangeEnabled() == [True, True]
+    show_placeholder(plot, "Train models first.")
+    assert item.is_empty and item.empty_text == "Train models first."
+    plot.clear()  # the page's own message stays until data arrives
+    assert item.is_empty and item.empty_text == "Train models first."
 
 
 def test_every_chart_uses_the_standard_menu(qtbot, monkeypatch, tmp_path):

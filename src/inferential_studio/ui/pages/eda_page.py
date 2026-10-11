@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html import escape
+
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
@@ -21,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from inferential_studio.core.importers import format_duration
 from inferential_studio.core.statistics import (
     EdaResult,
     compute_eda,
@@ -36,6 +39,7 @@ from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.widgets.chart_menu import add_plot
 from inferential_studio.ui.widgets.cursor_readout import CursorReadout
 from inferential_studio.ui.widgets.data_table import DataTableView
+from inferential_studio.ui.widgets.flow_layout import flow_row
 from inferential_studio.ui.widgets.heatmap import CorrelationHeatmap
 from inferential_studio.ui.widgets.plots import clear_placeholder, plot_widget, show_placeholder
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem, to_epoch_seconds
@@ -174,8 +178,6 @@ class EdaPage(StagePage):
         self.method.currentIndexChanged.connect(self._update_correlation)
         for w in (self.absolute, self.cluster):
             w.toggled.connect(self._update_correlation)
-        self.corr_scope = QLabel()
-        self.corr_scope.setObjectName("placeholderNote")
         self.heatmap = CorrelationHeatmap()
         self.heatmap.cell_clicked.connect(self._show_pair)
         self.pair_plot = plot_widget(name="scatter")
@@ -185,12 +187,7 @@ class EdaPage(StagePage):
         self._pair_placeholder()
         self._corr_tab = QWidget()
         cl = QVBoxLayout(self._corr_tab)
-        controls = QHBoxLayout()
-        for w in (self.method, self.absolute, self.cluster):
-            controls.addWidget(w)
-        controls.addStretch(1)
-        controls.addWidget(self.corr_scope)
-        cl.addLayout(controls)
+        cl.addWidget(flow_row(self.method, self.absolute, self.cluster))
         split = QSplitter(Qt.Orientation.Horizontal)
         split.addWidget(self.heatmap)
         pair_box = QWidget()
@@ -219,7 +216,9 @@ class EdaPage(StagePage):
 
         self.hist_var = QComboBox()
         self.hist_var.currentIndexChanged.connect(self._update_histogram)
-        self.hist_plot = plot_widget(name="distribution")
+        self.hist_plot = plot_widget(
+            name="distribution", empty_text="Import data to see distributions."
+        )
         self._hist_tab = QWidget()
         hl = QVBoxLayout(self._hist_tab)
         hl.addWidget(self.hist_var)
@@ -262,9 +261,11 @@ class EdaPage(StagePage):
         self.tabs.currentChanged.connect(lambda _i: self._update_visible_tab())
 
         main = QSplitter(Qt.Orientation.Horizontal)
+        left.setMinimumWidth(210)
         main.addWidget(left)
         main.addWidget(self.tabs)
-        main.setSizes([220, 900])
+        main.setSizes([230, 900])
+        main.setStretchFactor(1, 1)  # extra width goes to the charts
         self.body.addWidget(main, 1)
 
         session.data_changed.connect(self._on_data_changed)
@@ -467,7 +468,6 @@ class EdaPage(StagePage):
         )
         pairs = self._result.pairs
         keep = [n for n in self.selected_variables() if n in corr.columns]
-        self.corr_scope.setText(f"{len(keep)} checked variable{'s' if len(keep) != 1 else ''}")
         if self._pair is not None and not set(self._pair) <= set(keep):
             self._pair_placeholder()  # the pair shown is no longer in the matrix
         if len(keep) < 2:
@@ -628,8 +628,9 @@ class EdaPage(StagePage):
             self.xy_table.set_frame(pd.DataFrame())
             return
         self.xy_note.setText(
-            f"<b>Preliminary screening.</b> {xy.note} Pairing tolerance: {xy.tolerance}. "
-            f"{xy.n_target_samples} target samples. Correlations are recalculated on aligned features in Signal Processing."
+            f"<b>Preliminary screening.</b> {escape(xy.note.removeprefix('Preliminary: '))} "
+            f"Pairing tolerance: {format_duration(xy.tolerance)}; {xy.n_target_samples} target "
+            "samples. Correlations are recalculated on aligned features in Signal Processing."
         )
         table = xy.table.copy()
         table.insert(0, "units", [self._units.get(n) or "" for n in table.index])

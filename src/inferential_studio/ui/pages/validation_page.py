@@ -8,10 +8,12 @@ import pyqtgraph as pg
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
@@ -51,6 +53,8 @@ REVEAL_TEXT = (
     "estimate.\n\nShow the final test results now?"
 )
 
+NO_RUN_TEXT = "Train models on Model Setup to compare them here."
+
 
 class ValidationPage(StagePage):
     def __init__(
@@ -60,7 +64,7 @@ class ValidationPage(StagePage):
         self._session = session
 
         self.comparison = DataTableView()
-        self.comparison.setMinimumHeight(140)
+        self.comparison.setMinimumHeight(118)  # header + four models
         self.comparison_note = note_label()
         self.reveal_button = QPushButton("Show final test results…")
         self.reveal_button.clicked.connect(self.ask_reveal)
@@ -88,18 +92,24 @@ class ValidationPage(StagePage):
 
         self.tabs = QTabWidget()
         tz = session.project.display_timezone
-        self.avp = plot_widget("Actual vs predicted")
+        self.avp = plot_widget("Actual vs predicted", empty_text=NO_RUN_TEXT)
         legend(self.avp, "bottom-right")
-        self.trend = plot_widget("Lab samples and predictions", time_axis=tz)
+        self.trend = plot_widget(
+            "Lab samples and predictions", time_axis=tz, empty_text=NO_RUN_TEXT
+        )
         legend(self.trend)
-        self.res_time = plot_widget("Residual (actual − predicted) over time", time_axis=tz)
-        self.res_pred = plot_widget("Residual vs predicted")
+        self.res_time = plot_widget(
+            "Residual (actual − predicted) over time", time_axis=tz, empty_text=NO_RUN_TEXT
+        )
+        self.res_pred = plot_widget("Residual vs predicted", empty_text=NO_RUN_TEXT)
         self.res_x_var = QComboBox()
         self.res_x_var.currentIndexChanged.connect(self._update_residual_x)
-        self.res_x = plot_widget(name="residuals_vs_x")
-        self.res_hist = plot_widget("Residual distribution")
+        self.res_x = plot_widget(name="residuals_vs_x", empty_text=NO_RUN_TEXT)
+        self.res_hist = plot_widget("Residual distribution", empty_text=NO_RUN_TEXT)
         legend(self.res_hist, "top-right")
-        self.res_acf = plot_widget("Residual autocorrelation (consecutive lab samples)")
+        self.res_acf = plot_widget(
+            "Residual autocorrelation (consecutive lab samples)", empty_text=NO_RUN_TEXT
+        )
         legend(self.res_acf, "top-right")
         self.applicability = DataTableView()
         self.app_note = note_label()
@@ -129,10 +139,19 @@ class ValidationPage(StagePage):
         bl.setContentsMargins(0, 0, 0, 0)
         bl.addWidget(self.tabs, 1)
         bl.addWidget(self.plot_note)
+        # On short screens the tables scroll instead of squeezing the charts below them.
+        top_scroll = QScrollArea()
+        top_scroll.setWidgetResizable(True)
+        top_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        top_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        top_scroll.setWidget(top)
+        top_scroll.setMinimumHeight(150)
         split = QSplitter(Qt.Orientation.Vertical)
-        split.addWidget(top)
+        split.addWidget(top_scroll)
         split.addWidget(bottom)
-        split.setSizes([360, 440])
+        split.setSizes([top.sizeHint().height(), 440])
+        split.setStretchFactor(1, 1)
+        split.setChildrenCollapsible(False)
         self.body.addWidget(split, 1)
 
         session.training_changed.connect(self.refresh)

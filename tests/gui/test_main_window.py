@@ -102,12 +102,13 @@ def test_trend_hover_values_show_below_variable_list(qtbot, window, example_copy
     # The readout sits below the variable list and is a static box: hovered text
     # (however long) must never resize it or push the charts around.
     assert page.cursor.parent() is not None
-    assert page.cursor.minimumHeight() == page.cursor.maximumHeight()
+    assert page.cursor.sizeHint().height() == page.cursor.maximumHeight()  # not content-driven
+    before = page.cursor.height()
     page.trends._show_cursor(t)
     qtbot.wait(0)
     assert "<b>" in page.cursor.time_label.text()
     assert " = " in page.cursor.values_label.text()
-    assert page.cursor.height() == page.cursor.maximumHeight()
+    assert page.cursor.height() == before
 
 
 def test_open_sample_project_loads_data_in_background(qtbot, window, example_copy):

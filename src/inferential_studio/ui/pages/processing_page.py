@@ -16,11 +16,13 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QTableWidget,
@@ -57,8 +59,12 @@ from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.theme import mark_primary, theme_colour
 from inferential_studio.ui.widgets.data_table import DataTableView
+from inferential_studio.ui.widgets.flow_layout import flow_row
 from inferential_studio.ui.widgets.plots import legend, note_label, plot_widget, scatter
 from inferential_studio.ui.widgets.time_axis import format_time, to_epoch_seconds
+
+NO_PREDICTOR_TEXT = "Choose a target and predictors on Variable Selection to preview them."
+NO_LAB_TEXT = "No aligned lab samples to show."
 
 COLUMNS = [
     "Variable",
@@ -169,6 +175,10 @@ class ProcessingPage(StagePage):
                                 "Positive = further into the past; negative may read future data.")  # fmt: skip
         self.window = self._spin(0.1, 10080, " min", "Length of the aggregation window.")
         self.placement = QComboBox()
+        self.placement.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.placement.setMinimumContentsLength(14)
         self.placement.addItem("Lookback (ends at t − delay)", WindowPlacement.LOOKBACK.value)
         self.placement.addItem("Centred (non-causal)", WindowPlacement.CENTERED.value)
         self.aggregation = QComboBox()
@@ -199,10 +209,11 @@ class ProcessingPage(StagePage):
         mark_primary(self.apply_selected)
         self.apply_all = QPushButton("Apply to all")
         self.apply_all.clicked.connect(lambda: self.apply_form(all_rows=True))
-        self.regime = QCheckBox("Reject windows that overlap operating-regime exclusions")
+        self.regime = QCheckBox("Reject windows touching regime exclusions")
         self.regime.setToolTip(
-            "Shutdowns, start-ups and other exclusions of all signals make a sample ineligible "
-            "when any predictor window touches them, even if coverage would pass."
+            "Operating-regime exclusions (shutdowns, start-ups and other exclusions of all "
+            "signals) make a sample ineligible when any predictor window touches them, even if "
+            "coverage would pass."
         )
         self.regime.toggled.connect(self._regime_toggled)
         editor = QGroupBox("Settings for the selected predictors")
@@ -219,8 +230,8 @@ class ProcessingPage(StagePage):
         # -- preview / diagnostics tabs ------------------------------------------------
         self.tabs = QTabWidget()
         tz = session.project.display_timezone
-        self.x_plot = plot_widget(time_axis=tz, name="preview_x")
-        self.y_plot = plot_widget(time_axis=tz, name="preview_y")
+        self.x_plot = plot_widget(time_axis=tz, name="preview_x", empty_text=NO_PREDICTOR_TEXT)
+        self.y_plot = plot_widget(time_axis=tz, name="preview_y", empty_text=NO_LAB_TEXT)
         self.y_plot.setXLink(self.x_plot)
         legend(self.x_plot)
         self.sample_spin = QSpinBox()
@@ -239,11 +250,7 @@ class ProcessingPage(StagePage):
         self.sample_note = note_label()
         prev = QWidget()
         pl = QVBoxLayout(prev)
-        prow = QHBoxLayout()
-        for w in (prev_btn, self.sample_spin, next_btn, zoom_btn, fit_btn):
-            prow.addWidget(w)
-        prow.addStretch(1)
-        pl.addLayout(prow)
+        pl.addWidget(flow_row(prev_btn, self.sample_spin, next_btn, zoom_btn, fit_btn))
         split = QSplitter(Qt.Orientation.Vertical)
         split.addWidget(self.x_plot)
         split.addWidget(self.y_plot)
@@ -252,7 +259,10 @@ class ProcessingPage(StagePage):
         pl.addWidget(self.sample_note)
         self.tabs.addTab(prev, "Preview")
 
-        self.lag_plot = plot_widget(name="lag_sensitivity")
+        self.lag_plot = plot_widget(
+            name="lag_sensitivity",
+            empty_text="Run a scan to see the correlation for each tested delay.",
+        )
         self.lag_plot.setLabel("bottom", "Effective delay (deadtime + shift)", units="min")
         self.lag_plot.setLabel("left", "Pearson r with Y")
         self.lag_max = self._spin(1, 2880, " min", "Largest delay tested.")
@@ -264,19 +274,16 @@ class ProcessingPage(StagePage):
         self.lag_use = QPushButton("Use best delay as deadtime")
         self.lag_use.setEnabled(False)
         self.lag_use.clicked.connect(self._use_best_delay)
-        self.lag_note = note_label("Run a scan to see the correlation for each tested delay.")
+        self.lag_note = note_label()
         self.lag_note.setToolTip(LagScan.note)
         lag = QWidget()
         ll = QVBoxLayout(lag)
-        lrow = QHBoxLayout()
-        lrow.addWidget(QLabel("Up to"))
-        lrow.addWidget(self.lag_max)
-        lrow.addWidget(QLabel("step"))
-        lrow.addWidget(self.lag_step)
-        lrow.addWidget(self.lag_run)
-        lrow.addWidget(self.lag_use)
-        lrow.addStretch(1)
-        ll.addLayout(lrow)
+        span = QWidget()  # "Up to [ ] step [ ]" stays together when the row wraps
+        sl = QHBoxLayout(span)
+        sl.setContentsMargins(0, 0, 0, 0)
+        for w in (QLabel("Up to"), self.lag_max, QLabel("step"), self.lag_step):
+            sl.addWidget(w)
+        ll.addWidget(flow_row(span, self.lag_run, self.lag_use))
         ll.addWidget(self.lag_plot, 1)
         ll.addWidget(self.lag_note)
         self.tabs.addTab(lag, "Lag sensitivity")
@@ -308,7 +315,13 @@ class ProcessingPage(StagePage):
         left.setChildrenCollapsible(False)
         main = QSplitter(Qt.Orientation.Horizontal)
         main.addWidget(left)
-        main.addWidget(editor)
+        editor_scroll = QScrollArea()  # the form scrolls on short screens instead of clipping
+        editor_scroll.setWidgetResizable(True)
+        editor_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        editor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        editor_scroll.setWidget(editor)
+        editor_scroll.setMinimumWidth(editor.minimumSizeHint().width() + 12)
+        main.addWidget(editor_scroll)
         main.setSizes([820, 340])
         main.setStretchFactor(0, 1)
         main.setChildrenCollapsible(False)

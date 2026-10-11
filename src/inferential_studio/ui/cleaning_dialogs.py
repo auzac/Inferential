@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
+from html import escape
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QDate, QDateTime, Qt, QTime
@@ -155,7 +156,7 @@ class ScopeSelector(QGroupBox):
         group.addButton(self.all_radio)
         group.addButton(self.some_radio)
         self.list = QListWidget()
-        self.list.setMaximumHeight(140)
+        self.list.setMaximumHeight(120)
         for name in variables:
             item = QListWidgetItem(name)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -414,7 +415,7 @@ class RuleDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Exclusion rule" if rule is None else f"Edit rule — {rule.name}")
-        self.resize(760, 640)
+        self.resize(760, 720)
         self._rule = rule
         self._variables = variables
         self._preview = preview
@@ -460,6 +461,7 @@ class RuleDialog(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(holder)
+        scroll.setMinimumHeight(170)  # at least one full group of conditions is visible
         add_group = QPushButton("+ Group")
         add_group.setToolTip("Add a group of conditions, e.g. for (A or B) and C")
         add_group.clicked.connect(lambda: self._add_group())
@@ -560,9 +562,10 @@ class RuleDialog(QDialog):
         try:
             rule = self.result_rule()
         except SchemaError as exc:
-            self.preview_label.setText(tinted(str(exc)))
+            # Still being filled in: guidance, not an alarm (OK reports it as an error).
+            self.preview_label.setText(tinted(f"Incomplete: {exc}", "text_muted"))
             return
-        self.preview_label.setText(f"<b>{rule.describe()}</b><br>{self._preview(rule)}")
+        self.preview_label.setText(f"<b>{escape(rule.describe())}</b><br>{self._preview(rule)}")
 
     def accept(self) -> None:
         if not self.name.text().strip():

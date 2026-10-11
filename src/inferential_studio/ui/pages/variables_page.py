@@ -187,9 +187,11 @@ class VariablesPage(StagePage):
         self.tabs.addTab(tab, "Raw vs cleaned")
 
         split = QSplitter(Qt.Orientation.Horizontal)
+        left.setMinimumWidth(240)  # target name and variable list stay readable
         split.addWidget(left)
         split.addWidget(self.tabs)
         split.setSizes([260, 900])
+        split.setStretchFactor(1, 1)  # extra width goes to the tables, not the list
         self.body.addWidget(split, 1)
 
         session.changed.connect(self._refresh_selection)
