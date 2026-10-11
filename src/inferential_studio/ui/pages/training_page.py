@@ -34,6 +34,7 @@ from inferential_studio.ui.widgets.plots import (
     note_label,
     plot_widget,
     scatter,
+    show_placeholder,
 )
 
 COEF_NOTE = (
@@ -55,6 +56,8 @@ PCR_NOTE = (
     "PCA loadings are the eigenvectors of the scaled predictors. Components are ordered by the X "
     "variance they explain, which says nothing about how well they predict Y."
 )
+
+NO_RUN_TEXT = "Train models on Model Setup to see the results here."
 VAR_NOTE = {
     ModelKind.PLS: "Blue: share of scaled-X variation captured by each PLS component. Orange: share "
     "of training-Y variation explained by each component. Predictive quality is judged on the "
@@ -85,7 +88,7 @@ class TrainingPage(StagePage):
 
         self.tabs = QTabWidget()
         # Coefficients
-        self.coef_plot = plot_widget("Standardised coefficients")
+        self.coef_plot = plot_widget("Standardised coefficients", empty_text=NO_RUN_TEXT)
         self.coef_table = DataTableView()
         split = QSplitter(Qt.Orientation.Horizontal)
         split.addWidget(self.coef_plot)
@@ -97,7 +100,9 @@ class TrainingPage(StagePage):
         tl.addWidget(note_label(COEF_NOTE))
         self.tabs.addTab(tab, "Coefficients")
         # CV curve
-        self.cv_plot = plot_widget("Cross-validation error (training period only)")
+        self.cv_plot = plot_widget(
+            "Cross-validation error (training period only)", empty_text=NO_RUN_TEXT
+        )
         self.cv_plot.setLabel("left", "Mean RMSE over folds")
         self.cv_note = note_label()
         tab = QWidget()
@@ -110,7 +115,7 @@ class TrainingPage(StagePage):
         self.load_component = QComboBox()
         self.load_kind.currentIndexChanged.connect(self._update_loadings)
         self.load_component.currentIndexChanged.connect(self._update_loadings)
-        self.load_plot = plot_widget(name="loadings")
+        self.load_plot = plot_widget(name="loadings", empty_text=NO_RUN_TEXT)
         self.load_note = note_label()
         tab = QWidget()
         ll = QVBoxLayout(tab)
@@ -128,7 +133,7 @@ class TrainingPage(StagePage):
         self.score_y = QComboBox()
         self.score_x.currentIndexChanged.connect(self._update_scores)
         self.score_y.currentIndexChanged.connect(self._update_scores)
-        self.score_plot = plot_widget(name="scores")
+        self.score_plot = plot_widget(name="scores", empty_text=NO_RUN_TEXT)
         legend(self.score_plot)
         self.score_note = note_label()
         tab = QWidget()
@@ -145,7 +150,7 @@ class TrainingPage(StagePage):
         self._score_tab = tab
         self.tabs.addTab(tab, "Scores")
         # Explained variance
-        self.var_plot = plot_widget("Explained variance per component")
+        self.var_plot = plot_widget("Explained variance per component", empty_text=NO_RUN_TEXT)
         self.var_plot.setLabel("left", "Share (%)")
         legend(self.var_plot)
         self.var_note = note_label()
@@ -194,8 +199,13 @@ class TrainingPage(StagePage):
     @Slot()
     def _show_model(self) -> None:
         m = self.current()
+        empty = (
+            f"{m.spec.label} could not be trained (see the message panel)."
+            if m is not None and not m.ok
+            else NO_RUN_TEXT
+        )
         for plot in (self.coef_plot, self.cv_plot, self.load_plot, self.score_plot, self.var_plot):
-            plot.clear()
+            show_placeholder(plot, empty)
         self.coef_table.set_frame(pd.DataFrame())
         msgs = self._session.messages
         msgs.clear("training.model")
@@ -215,6 +225,10 @@ class TrainingPage(StagePage):
             self.tabs.setTabEnabled(self.tabs.indexOf(tab), latent)
         if latent:
             self._fill_latent_controls(m)
+        else:
+            for plot in (self.load_plot, self.score_plot, self.var_plot):
+                show_placeholder(plot, f"{m.spec.label} has no latent components: loadings, "
+                                       "VIP, scores and explained variance apply to PLS and PCR.")  # fmt: skip
         if m.warnings:
             msgs.set("training.model", Level.WARNING, f"{m.name}: " + " ".join(m.warnings),
                      also=("validation",))  # fmt: skip
@@ -253,14 +267,14 @@ class TrainingPage(StagePage):
 
     def _update_cv(self, m: ModelResult) -> None:
         cv = m.cv
-        self.cv_plot.setVisible(cv is not None)
         if cv is None:
             text = (
-                f"Mean CV RMSE: {m.cv_rmse:.4g}. This model has no tuned hyperparameter."
+                f"{m.spec.label} has no tuned hyperparameter. Mean CV RMSE: {m.cv_rmse:.4g}."
                 if np.isfinite(m.cv_rmse)
                 else "No cross-validation result (fixed hyperparameters or too few samples)."
             )
-            self.cv_note.setText(text)
+            show_placeholder(self.cv_plot, text)
+            self.cv_note.setText("")
             return
         x = np.log10(cv.values) if cv.parameter == "alpha" else cv.values
         self.cv_plot.setLabel("bottom", "log10(alpha)" if cv.parameter == "alpha" else "Components")

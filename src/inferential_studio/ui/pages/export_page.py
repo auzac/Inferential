@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QGroupBox,
-    QHBoxLayout,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
@@ -58,6 +57,7 @@ from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.theme import mark_primary
+from inferential_studio.ui.widgets.flow_layout import flow_row
 from inferential_studio.ui.widgets.plots import (
     clear_placeholder,
     legend,
@@ -172,15 +172,24 @@ class ExportPage(StagePage):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(left)
-        scroll.setMinimumWidth(430)
+        scroll.setMinimumWidth(330)
 
         # -- apply a saved model ---------------------------------------------------------
         self.btn_load = QPushButton("Load model file…")
         self.btn_load.clicked.connect(lambda: self.load_model_file())
         self.loaded_note = note_label("Apply a saved model to the data loaded in this project.")
         self.when = QComboBox()
-        self.when.addItem("At the lab sample times (compare with the lab)", "lab")
-        self.when.addItem("At regular intervals over the loaded period", "grid")
+        self.when.addItem("At lab sample times", "lab")
+        self.when.addItem("At regular intervals", "grid")
+        self.when.setItemData(
+            0, "Predict where lab results exist and compare with them", Qt.ItemDataRole.ToolTipRole
+        )
+        self.when.setItemData(1, "Predict every N minutes over the loaded period",
+                              Qt.ItemDataRole.ToolTipRole)  # fmt: skip
+        self.when.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.when.setMinimumContentsLength(24)  # long item texts elide instead of widening the page
         self.every = QDoubleSpinBox()
         self.every.setRange(1, 1440)
         self.every.setValue(60)
@@ -205,17 +214,8 @@ class ExportPage(StagePage):
         self.apply_note = note_label()
         apply_box = QGroupBox("Apply a saved model (batch prediction)")
         al = QVBoxLayout(apply_box)
-        row = QHBoxLayout()
-        row.addWidget(self.btn_load)
-        row.addStretch(1)
-        row.addWidget(self.btn_apply)
-        row.addWidget(self.btn_export_applied)
-        al.addLayout(row)
-        row2 = QHBoxLayout()
-        row2.addWidget(self.when, 1)
-        row2.addWidget(self.every)
-        row2.addWidget(self.use_exclusions)
-        al.addLayout(row2)
+        al.addWidget(flow_row(self.btn_load, self.btn_apply, self.btn_export_applied))
+        al.addWidget(flow_row(self.when, self.every, self.use_exclusions))
         al.addWidget(self.loaded_note)
         al.addWidget(self.apply_plot, 1)
         al.addWidget(self.apply_note)

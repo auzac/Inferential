@@ -39,8 +39,15 @@ LEVEL_COLOURS = {
 LEVEL_NAMES = {Level.INFO: "Info", Level.WARNING: "Warning", Level.ERROR: "Error"}
 STAGE_TITLES = {s.key: f"{s.number}. {s.title}" for s in STAGES} | {APP: "Application"}
 ROWS_VISIBLE = 4
+ROWS_COMPACT = 3  # short screens (laptops): one row less, more room for the page
 ROW_HEIGHT = 22
-PANEL_HEIGHT = 30 + ROWS_VISIBLE * ROW_HEIGHT + 8
+
+
+def panel_height(rows: int = ROWS_VISIBLE) -> int:
+    return 30 + rows * ROW_HEIGHT + 8
+
+
+PANEL_HEIGHT = panel_height()
 
 
 def level_icon(level: Level, size: int = 14) -> QIcon:
@@ -102,15 +109,18 @@ def ok_icon(size: int = 14) -> QIcon:
 class MessagePanel(QFrame):
     """Always-visible, fixed-height log: active conditions pinned on top, then events."""
 
-    def __init__(self, center: MessageCenter, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, center: MessageCenter, parent: QWidget | None = None, *, rows: int = ROWS_VISIBLE
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("messagePanel")
-        self.setFixedHeight(PANEL_HEIGHT)
+        self.rows = rows
+        self.setFixedHeight(panel_height(rows))  # fixed for the session: pages never move
         self._center = center
         self._stage: str | None = None
         self._icons = {lvl: level_icon(lvl) for lvl in Level}
 
-        title = QLabel("MESSAGES")
+        title = QLabel("Messages")
         title.setObjectName("messageTitle")
         self.badges = {lvl: QLabel() for lvl in (Level.ERROR, Level.WARNING)}
         for lvl, badge in self.badges.items():

@@ -30,12 +30,13 @@ class ChartViewBox(pg.ViewBox):
     def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003 - pyqtgraph signature
         kwargs["enableMenu"] = False
         super().__init__(*args, **kwargs)
+        self.empty = False  # set by plots.ChartPlotItem while it shows its "no data" message
 
     def mouseClickEvent(self, ev) -> None:  # noqa: ANN001, N802 - pyqtgraph override
         if ev.button() == Qt.MouseButton.RightButton:
             ev.accept()
             view = chart_view(self)
-            if view is not None and not view.property("placeholder"):
+            if view is not None and not self.empty:
                 show_chart_menu(view, ev.screenPos().toPoint())
             return
         super().mouseClickEvent(ev)

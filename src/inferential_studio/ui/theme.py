@@ -12,6 +12,7 @@ leak into Fusion (white-on-light text, inconsistent selection after focus change
 from __future__ import annotations
 
 import tempfile
+from html import escape
 from pathlib import Path
 
 import pyqtgraph as pg
@@ -63,14 +64,14 @@ QMenuBar QToolButton {{ background: transparent; border: none; border-radius: 3p
                         color: {T["text"]}; }}
 QMenuBar QToolButton:hover {{ background: {T["accent_soft"]}; }}
 QMenuBar QToolButton:pressed {{ background: #c8dcee; }}
+QMenuBar QToolButton:checked {{ background: {T["accent_soft"]}; color: {T["accent_pressed"]}; }}
 QMenuBar QToolButton:disabled {{ color: {T["text_faint"]}; }}
 QMenuBar QFrame#menuBarSeparator {{ background: {T["border"]}; margin: 7px 6px; }}
 
 /* ---- navigation rail --------------------------------------------------------------- */
 QWidget#rail {{ background: {T["rail"]}; }}
 QLabel#railTitle {{ color: #ffffff; font-weight: 600; font-size: 10.5pt; padding: 14px 16px 0 16px; }}
-QLabel#railSubtitle {{ color: {T["text_faint"]}; font-size: 7.5pt; letter-spacing: 1px;
-                       padding: 2px 16px 12px 16px; }}
+QLabel#railSubtitle {{ color: {T["text_faint"]}; font-size: 8.5pt; padding: 2px 16px 14px 16px; }}
 QListWidget#sidebar {{ background: {T["rail"]}; color: {T["rail_text"]}; border: none; outline: none; }}
 QListWidget#sidebar::item {{ color: {T["rail_text"]}; background: transparent; border: none;
                              border-left: 3px solid transparent; padding: 4px 12px; margin: 0; }}
@@ -81,8 +82,8 @@ QListWidget#sidebar::item:selected:!active {{ background: {T["rail_selected"]}; 
 
 /* ---- page header ------------------------------------------------------------------- */
 QFrame#pageHeader {{ background: {T["surface"]}; border: none; border-bottom: 1px solid {T["border"]}; }}
-QLabel#pageEyebrow {{ color: {T["accent"]}; font-size: 7.5pt; font-weight: 700; letter-spacing: 1px; }}
-QLabel#pageTitle {{ font-size: 15pt; font-weight: 600; color: {T["text"]}; }}
+QLabel#pageEyebrow {{ color: {T["accent"]}; font-size: 8.5pt; font-weight: 600; }}
+QLabel#pageTitle {{ font-size: 14pt; font-weight: 600; color: {T["text"]}; }}
 QLabel#pageGoal {{ color: {T["text_muted"]}; }}
 QLabel#placeholderNote {{ color: {T["text_muted"]}; font-size: 8.5pt; }}
 QLabel#sectionTitle {{ color: {T["text_muted"]}; font-weight: 600; }}
@@ -93,7 +94,7 @@ QGroupBox {{ background: {T["surface"]}; border: 1px solid {T["border"]}; border
 QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; left: 8px;
                     padding: 0 4px; color: {T["text_muted"]}; }}
 QTabWidget::pane {{ background: {T["surface"]}; border: 1px solid {T["border"]}; top: -1px; }}
-QTabBar::tab {{ background: transparent; color: {T["text_muted"]}; padding: 6px 14px; margin-right: 2px;
+QTabBar::tab {{ background: transparent; color: {T["text_muted"]}; padding: 6px 12px; margin-right: 1px;
                 border: none; border-bottom: 2px solid transparent; }}
 QTabBar::tab:hover {{ color: {T["text"]}; }}
 QTabBar::tab:selected {{ color: {T["text"]}; border-bottom: 2px solid {T["accent"]}; font-weight: 600; }}
@@ -108,6 +109,7 @@ QTableView, QTableWidget, QTreeWidget, QListWidget, QTextBrowser, QPlainTextEdit
     background: {T["surface"]}; border: 1px solid {T["border"]}; gridline-color: #e4e8ed;
     selection-background-color: {T["accent_soft"]}; selection-color: {T["text"]};
     alternate-background-color: {T["surface_alt"]}; }}
+QHeaderView {{ background: {T["surface"]}; }}  /* no grey band under the last row */
 QHeaderView::section {{ background: {T["surface_alt"]}; color: {T["text_muted"]}; font-weight: 600;
                         border: none; border-right: 1px solid #e4e8ed; border-bottom: 1px solid {T["border"]};
                         padding: 4px 6px; }}
@@ -136,6 +138,8 @@ QPushButton[primary="true"]:hover {{ background: {T["accent_hover"]}; }}
 QPushButton[primary="true"]:pressed {{ background: {T["accent_pressed"]}; }}
 QPushButton[primary="true"]:disabled {{ background: #9fb7cc; border-color: #9fb7cc; color: #eef3f7; }}
 QToolButton {{ border-radius: 3px; padding: 3px 8px; }}
+QToolButton#iconButton {{ padding: 0; min-width: 24px; min-height: 24px; color: {T["text_muted"]}; }}
+QToolButton#iconButton:hover {{ color: {T["error"]}; background: {T["error_soft"]}; }}
 QToolButton:hover {{ background: {T["accent_soft"]}; }}
 QCheckBox, QRadioButton {{ spacing: 6px; }}
 
@@ -153,7 +157,7 @@ QDockWidget::title {{ background: {T["surface_alt"]}; padding: 6px 8px; border-b
 QDockWidget#propertiesDock QTextBrowser {{ border: none; padding: 6px; }}
 QFrame#messagePanel {{ background: {T["surface"]}; border: none; border-top: 2px solid {T["border_strong"]}; }}
 QFrame#messagePanel[flash="true"] {{ border-top: 2px solid {T["warning"]}; }}
-QLabel#messageTitle {{ color: {T["text_muted"]}; font-weight: 700; font-size: 7.5pt; letter-spacing: 1px; }}
+QLabel#messageTitle {{ color: {T["text_muted"]}; font-weight: 600; }}
 QLabel#badgeError {{ background: {T["error_soft"]}; color: {T["error"]}; border-radius: 8px;
                      padding: 0 8px; font-weight: 600; font-size: 8pt; }}
 QLabel#badgeWarning {{ background: {T["warning_soft"]}; color: {T["warning"]}; border-radius: 8px;
@@ -220,6 +224,8 @@ def _arrow_images() -> dict[str, str]:
     for name, points in {
         "down": ((1, 3), (9, 3), (5, 8)),
         "up": ((1, 7), (9, 7), (5, 2)),
+        "left": ((7, 1), (7, 9), (2, 5)),
+        "right": ((3, 1), (3, 9), (8, 5)),
     }.items():
         for state, colour in (("", T["text_muted"]), ("_disabled", T["text_faint"])):
             path = folder / f"arrow_{name}{state}.png"
@@ -255,6 +261,14 @@ QAbstractSpinBox::up-arrow:disabled, QAbstractSpinBox::up-arrow:off {{ image: ur
 QAbstractSpinBox::down-arrow:disabled, QAbstractSpinBox::down-arrow:off {{ image: url({a["down_disabled"]}); }}
 QDateTimeEdit::drop-down {{ width: 18px; border: none; border-left: 1px solid {T["border"]}; }}
 QDateTimeEdit::down-arrow {{ image: url({a["down"]}); width: 10px; height: 10px; }}
+QTabBar::scroller {{ width: 40px; }}
+QTabBar QToolButton {{ background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 0;
+                       margin: 3px 0 3px 0; padding: 0; }}
+QTabBar QToolButton:hover {{ background: {T["accent_soft"]}; }}
+QTabBar QToolButton::left-arrow {{ image: url({a["left"]}); width: 8px; height: 8px; }}
+QTabBar QToolButton::right-arrow {{ image: url({a["right"]}); width: 8px; height: 8px; }}
+QTabBar QToolButton::left-arrow:disabled {{ image: url({a["left_disabled"]}); }}
+QTabBar QToolButton::right-arrow:disabled {{ image: url({a["right_disabled"]}); }}
 """
 
 
@@ -289,4 +303,5 @@ def tinted(text: str, token: str = "error", *, bold: bool = False) -> str:
     if not text:
         return ""
     weight = "font-weight:600;" if bold else ""
-    return f"<span style='color:{TOKENS[token]};{weight}'>{text}</span>"
+    # Escaped: messages quote user input and operators ("Feed_Flow <: value is required").
+    return f"<span style='color:{TOKENS[token]};{weight}'>{escape(text)}</span>"

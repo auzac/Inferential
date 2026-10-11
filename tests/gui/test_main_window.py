@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QLabel, QMessageBox
 
 from inferential_studio.infrastructure.settings import AppSettings
 from inferential_studio.ui.main_window import MainWindow
@@ -62,6 +62,29 @@ def test_shell_has_nine_stages_and_navigation(window):
     assert window.lbl_records.text() == "Process records: —"
 
 
+def test_window_remembers_size_and_help_panel(qtbot, monkeypatch):
+    first = MainWindow(AppSettings())
+    qtbot.addWidget(first)
+    monkeypatch.setattr(first, "maybe_save", lambda: True)
+    # The offscreen test screen is narrow: the help panel starts closed, the toggle says so.
+    assert first.properties_dock.isHidden() and not first.act_help_panel.isChecked()
+    assert first.help_panel_button.defaultAction() is first.act_help_panel
+    first.show()
+    first.act_help_panel.trigger()  # the user opens it
+    first.resize(960, 690)
+    first.close()
+    settings = first.settings
+    assert settings.window_geometry and settings.help_panel is True
+    second = MainWindow(settings)
+    qtbot.addWidget(second)
+    monkeypatch.setattr(second, "maybe_save", lambda: True)
+    second.show()
+    assert second.size().height() == 690 and second.properties_dock.isVisible()
+    second.act_help_panel.trigger()  # closed again = back to the automatic default
+    second.close()
+    assert second.settings.help_panel is None
+
+
 def test_new_project_uses_display_timezone_from_settings(window):
     assert window.session.project.display_timezone == "Asia/Singapore"
 
@@ -73,7 +96,9 @@ def test_frequent_actions_live_on_menu_bar_not_toolbar(window):
     # instead of a separate toolbar.
     assert window.menuBar().findChildren(QToolBar) == []
     corner = window.menuBar().cornerWidget()
-    buttons = corner.findChildren(QToolButton)
+    layout = corner.layout()
+    buttons = [layout.itemAt(i).widget() for i in range(layout.count())]
+    buttons = [b for b in buttons if isinstance(b, QToolButton)]  # left to right
     assert [b.defaultAction() for b in buttons] == [
         window.act_new,
         window.act_open,
@@ -83,6 +108,7 @@ def test_frequent_actions_live_on_menu_bar_not_toolbar(window):
         window.act_export,
         window.act_undo,
         window.act_redo,
+        window.act_help_panel,
         window.act_settings,
     ]
 
@@ -102,12 +128,13 @@ def test_trend_hover_values_show_below_variable_list(qtbot, window, example_copy
     # The readout sits below the variable list and is a static box: hovered text
     # (however long) must never resize it or push the charts around.
     assert page.cursor.parent() is not None
-    assert page.cursor.minimumHeight() == page.cursor.maximumHeight()
+    assert page.cursor.sizeHint().height() == page.cursor.maximumHeight()  # not content-driven
+    before = page.cursor.height()
     page.trends._show_cursor(t)
     qtbot.wait(0)
     assert "<b>" in page.cursor.time_label.text()
     assert " = " in page.cursor.values_label.text()
-    assert page.cursor.height() == page.cursor.maximumHeight()
+    assert page.cursor.height() == before
 
 
 def test_open_sample_project_loads_data_in_background(qtbot, window, example_copy):
@@ -285,3 +312,15 @@ def test_project_settings_change_display_timezone(qtbot, window):
     assert dialog.apply_to(window.session.project)
     assert window.session.project.display_timezone == "Europe/London"
     assert not dialog.apply_to(window.session.project)  # no change the second time
+
+
+def test_rail_shows_project_name_and_unsaved_state(qtbot, window, example_copy):
+    assert window.rail_project.text() == (window.session.project.name or "Untitled project")
+    open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
+    name = window.session.project.name
+    assert window.rail_project.text() == name
+    assert window.rail_project.toolTip().endswith("sample_project.imsproj")
+    window.session._set_dirty(True)
+    assert window.rail_project.text() == f"{name} (unsaved changes)"
+    window.session._set_dirty(False)
+    assert window.pages["import"].findChild(QLabel, "pageEyebrow").text() == "Stage 1 of 9"

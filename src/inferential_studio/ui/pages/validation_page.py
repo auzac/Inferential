@@ -51,6 +51,8 @@ REVEAL_TEXT = (
     "estimate.\n\nShow the final test results now?"
 )
 
+NO_RUN_TEXT = "Train models on Model Setup to compare them here."
+
 
 class ValidationPage(StagePage):
     def __init__(
@@ -60,46 +62,50 @@ class ValidationPage(StagePage):
         self._session = session
 
         self.comparison = DataTableView()
-        self.comparison.setMinimumHeight(140)
+        self.comparison.fit_to_rows(max_rows=6)  # one row per model, no empty band
         self.comparison_note = note_label()
         self.reveal_button = QPushButton("Show final test results…")
         self.reveal_button.clicked.connect(self.ask_reveal)
         self.model_combo = QComboBox()
         self.model_combo.currentIndexChanged.connect(self._show_model)
         self.metrics = DataTableView(sortable=False)
-        # Header + three periods, always fully visible.
-        self.metrics.setFixedHeight(28 + 3 * 22 + 6)
+        self.metrics.fit_to_rows(max_rows=3)  # training, validation and, once revealed, final test
 
+        # Top: every model side by side. Bottom: one model's metrics and diagnostic charts.
         top = QWidget()
         tl = QVBoxLayout(top)
         tl.setContentsMargins(0, 0, 0, 0)
         row = QHBoxLayout()
-        row.addWidget(QLabel("Model comparison (same split for every model)"))
+        heading = QLabel("Model comparison (same split for every model)")
+        heading.setObjectName("sectionTitle")
+        row.addWidget(heading)
         row.addStretch(1)
         row.addWidget(self.reveal_button)
         tl.addLayout(row)
-        tl.addWidget(self.comparison, 1)
+        tl.addWidget(self.comparison)
         tl.addWidget(self.comparison_note)
-        mrow = QHBoxLayout()
-        mrow.addWidget(QLabel("Diagnostics for"))
-        mrow.addWidget(self.model_combo, 1)
-        tl.addLayout(mrow)
-        tl.addWidget(self.metrics)
+        tl.addStretch(1)
 
         self.tabs = QTabWidget()
         tz = session.project.display_timezone
-        self.avp = plot_widget("Actual vs predicted")
+        self.avp = plot_widget("Actual vs predicted", empty_text=NO_RUN_TEXT)
         legend(self.avp, "bottom-right")
-        self.trend = plot_widget("Lab samples and predictions", time_axis=tz)
+        self.trend = plot_widget(
+            "Lab samples and predictions", time_axis=tz, empty_text=NO_RUN_TEXT
+        )
         legend(self.trend)
-        self.res_time = plot_widget("Residual (actual − predicted) over time", time_axis=tz)
-        self.res_pred = plot_widget("Residual vs predicted")
+        self.res_time = plot_widget(
+            "Residual (actual − predicted) over time", time_axis=tz, empty_text=NO_RUN_TEXT
+        )
+        self.res_pred = plot_widget("Residual vs predicted", empty_text=NO_RUN_TEXT)
         self.res_x_var = QComboBox()
         self.res_x_var.currentIndexChanged.connect(self._update_residual_x)
-        self.res_x = plot_widget(name="residuals_vs_x")
-        self.res_hist = plot_widget("Residual distribution")
+        self.res_x = plot_widget(name="residuals_vs_x", empty_text=NO_RUN_TEXT)
+        self.res_hist = plot_widget("Residual distribution", empty_text=NO_RUN_TEXT)
         legend(self.res_hist, "top-right")
-        self.res_acf = plot_widget("Residual autocorrelation (consecutive lab samples)")
+        self.res_acf = plot_widget(
+            "Residual autocorrelation (consecutive lab samples)", empty_text=NO_RUN_TEXT
+        )
         legend(self.res_acf, "top-right")
         self.applicability = DataTableView()
         self.app_note = note_label()
@@ -127,12 +133,23 @@ class ValidationPage(StagePage):
         bottom = QWidget()
         bl = QVBoxLayout(bottom)
         bl.setContentsMargins(0, 0, 0, 0)
+        mrow = QHBoxLayout()
+        diag = QLabel("Diagnostics for")
+        diag.setObjectName("sectionTitle")
+        mrow.addWidget(diag)
+        mrow.addWidget(self.model_combo, 1)
+        bl.addLayout(mrow)
+        bl.addWidget(self.metrics)
         bl.addWidget(self.tabs, 1)
         bl.addWidget(self.plot_note)
+        # The comparison keeps its natural height (its table fits its rows); the diagnostics
+        # below take the rest of the page.
         split = QSplitter(Qt.Orientation.Vertical)
         split.addWidget(top)
         split.addWidget(bottom)
-        split.setSizes([360, 440])
+        split.setStretchFactor(0, 0)
+        split.setStretchFactor(1, 1)
+        split.setChildrenCollapsible(False)
         self.body.addWidget(split, 1)
 
         session.training_changed.connect(self.refresh)

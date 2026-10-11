@@ -31,6 +31,8 @@ class AppSettings:
     recent_projects: list[str] = field(default_factory=list)
     last_directory: str = ""
     author_name: str = ""  # recorded on exclusions and model cards
+    window_geometry: str = ""  # Qt saveGeometry() as base64; empty = size to the screen
+    help_panel: bool | None = None  # None = automatic (shown on wide screens only)
 
     def add_recent(self, path: str | os.PathLike[str]) -> None:
         text = str(Path(path))
@@ -52,6 +54,8 @@ class AppSettings:
             recent_projects=[p for p in self.recent_projects if isinstance(p, str)][:MAX_RECENT],
             last_directory=self.last_directory if isinstance(self.last_directory, str) else "",
             author_name=self.author_name if isinstance(self.author_name, str) else "",
+            window_geometry=self.window_geometry if isinstance(self.window_geometry, str) else "",
+            help_panel=self.help_panel if isinstance(self.help_panel, bool) else None,
         )
 
 

@@ -1,8 +1,11 @@
 # User guide
 
-This guide covers **v0.5.3**: all nine stages, from data import to the model card. The **Help**
-panel on the right gives a short guide to the stage on screen; **F1** opens this guide inside
-the application (offline).
+This guide covers **v0.5.4**: all nine stages, from data import to the model card. The **Help
+panel** on the right gives a short guide to the stage on screen; **F1** opens this guide inside
+the application (offline). The panel starts open on wide screens and closed on laptops; show or
+hide it with **Help panel** on the menu bar (Shift+F1). The window remembers its size, position
+and your Help panel choice between sessions. The name of the open project is shown under the
+application name on the left; "(unsaved changes)" appears there until you save.
 
 **Messages.** Every status line, warning and error appears in the fixed **Messages** panel at
 the bottom of the window — never inside the page, so charts and tables stay where they are.

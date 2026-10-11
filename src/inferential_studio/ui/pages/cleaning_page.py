@@ -60,6 +60,7 @@ from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.theme import mark_primary, theme_colour, tinted
 from inferential_studio.ui.widgets.cursor_readout import CursorReadout
 from inferential_studio.ui.widgets.data_table import DataTableView
+from inferential_studio.ui.widgets.flow_layout import flow_row
 from inferential_studio.ui.widgets.overlays import IntervalShade, mask_spans
 from inferential_studio.ui.widgets.time_axis import to_epoch_seconds
 from inferential_studio.ui.widgets.trend_view import TrendSeries, TrendView
@@ -102,6 +103,8 @@ def _table(headers: list[str]) -> QTableWidget:
     t.verticalHeader().setVisible(False)
     t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
     t.horizontalHeader().setStretchLastSection(True)
+    t.setAlternatingRowColors(True)
+    t.setMinimumHeight(64)  # header + two rows; the tab scrolls rather than the page growing
     return t
 
 
@@ -177,12 +180,15 @@ class CleaningPage(StagePage):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
+        self.variables.setMinimumHeight(90)
         left_layout.addWidget(self.variables, 1)  # the list scrolls when there are many tags
         left_layout.addWidget(self.cursor)
         top = QSplitter(Qt.Orientation.Horizontal)
+        left.setMinimumWidth(210)
         top.addWidget(left)
         top.addWidget(self.trends)
         top.setSizes([230, 870])
+        top.setStretchFactor(1, 1)  # extra width goes to the charts
 
         # -- tabs -------------------------------------------------------------------
         self.tabs = QTabWidget()
@@ -213,7 +219,7 @@ class CleaningPage(StagePage):
         )
         self.manual_table.itemChanged.connect(self._manual_toggled)
         self.manual_table.cellDoubleClicked.connect(lambda _r, _c: self._edit_interval())
-        buttons = QHBoxLayout()
+        buttons = []
         for text, slot in (
             ("Edit…", self._edit_interval),
             ("Delete", self._delete_intervals),
@@ -221,17 +227,17 @@ class CleaningPage(StagePage):
         ):
             b = QPushButton(text)
             b.clicked.connect(slot)
-            buttons.addWidget(b)
-        buttons.addStretch(1)
+            buttons.append(b)
         hint = QLabel(
             "To add one: Select range on the chart, drag its edges, then Exclude selection."
         )
         hint.setObjectName("placeholderNote")
-        buttons.addWidget(hint)
+        hint.setWordWrap(True)
         w = QWidget()
         layout = QVBoxLayout(w)
-        layout.addLayout(buttons)
+        layout.addWidget(flow_row(*buttons))
         layout.addWidget(self.manual_table, 1)
+        layout.addWidget(hint)
         return w
 
     def _build_rules_tab(self) -> QWidget:
@@ -240,7 +246,7 @@ class CleaningPage(StagePage):
         )
         self.rules_table.itemChanged.connect(self._rule_toggled)
         self.rules_table.cellDoubleClicked.connect(lambda _r, _c: self._edit_rule())
-        buttons = QHBoxLayout()
+        buttons = []
         for text, slot in (
             ("Add rule…", self._add_rule),
             ("Edit…", self._edit_rule),
@@ -249,11 +255,10 @@ class CleaningPage(StagePage):
         ):
             b = QPushButton(text)
             b.clicked.connect(slot)
-            buttons.addWidget(b)
-        buttons.addStretch(1)
+            buttons.append(b)
         w = QWidget()
         layout = QVBoxLayout(w)
-        layout.addLayout(buttons)
+        layout.addWidget(flow_row(*buttons))
         layout.addWidget(self.rules_table, 1)
         return w
 
@@ -264,7 +269,7 @@ class CleaningPage(StagePage):
         self.detector_table.itemChanged.connect(self._detector_toggled)
         self.detector_table.cellDoubleClicked.connect(lambda _r, _c: self._edit_detector())
         self.detector_table.itemSelectionChanged.connect(self._fill_events)
-        det_buttons = QHBoxLayout()
+        det_buttons = []
         for text, slot in (
             ("Add…", self._add_detector),
             ("Add recommended", self._add_recommended),
@@ -274,8 +279,7 @@ class CleaningPage(StagePage):
         ):
             b = QPushButton(text)
             b.clicked.connect(slot)
-            det_buttons.addWidget(b)
-        det_buttons.addStretch(1)
+            det_buttons.append(b)
 
         self.event_filter = QComboBox()
         self.event_filter.addItem("All events", None)
@@ -288,8 +292,7 @@ class CleaningPage(StagePage):
         )
         self.events_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.events_table.cellDoubleClicked.connect(lambda _r, _c: self._zoom_event())
-        ev_buttons = QHBoxLayout()
-        ev_buttons.addWidget(self.event_filter)
+        ev_buttons: list[QWidget] = [self.event_filter]
         for text, slot, tip in (
             (
                 "Accept (exclude)",
@@ -302,16 +305,15 @@ class CleaningPage(StagePage):
                 "The selected flags are valid process behaviour",
             ),
             ("Reset", lambda: self._decide(None), "Back to pending review"),
-            ("Zoom to", self._zoom_event, "Show the selected event on the chart"),
         ):
             b = QPushButton(text)
             b.setToolTip(tip)
             b.clicked.connect(slot)
-            ev_buttons.addWidget(b)
-        ev_buttons.addStretch(1)
+            ev_buttons.append(b)
         self.events_note = QLabel(
-            "Flags never delete data: pending flags are only highlighted; accepted flags exclude "
-            "that variable's values; rejected flags are kept as valid."
+            "Double-click an event to show it on the chart. Flags never delete data: pending "
+            "flags are only highlighted, accepted flags exclude that variable's values, and "
+            "rejected flags are kept as valid."
         )
         self.events_note.setObjectName("placeholderNote")
         self.events_note.setWordWrap(True)
@@ -319,18 +321,19 @@ class CleaningPage(StagePage):
         left = QWidget()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
-        ll.addLayout(det_buttons)
+        ll.addWidget(flow_row(*det_buttons))
         ll.addWidget(self.detector_table, 1)
         right = QWidget()
         rl = QVBoxLayout(right)
         rl.setContentsMargins(0, 0, 0, 0)
-        rl.addLayout(ev_buttons)
+        rl.addWidget(flow_row(*ev_buttons))
         rl.addWidget(self.events_table, 1)
         rl.addWidget(self.events_note)
         split = QSplitter(Qt.Orientation.Horizontal)
         split.addWidget(left)
         split.addWidget(right)
         split.setSizes([450, 550])
+        split.setChildrenCollapsible(False)
         w = QWidget()
         QVBoxLayout(w).addWidget(split)
         return w
@@ -352,6 +355,7 @@ class CleaningPage(StagePage):
             "(rows × typical sampling interval)."
         )
         note.setObjectName("placeholderNote")
+        note.setWordWrap(True)
         layout.addWidget(note)
         return w
 

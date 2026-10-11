@@ -86,9 +86,18 @@ class HelpPanel(QTextBrowser):
         super().__init__(parent)
         self.setOpenExternalLinks(False)
         self.setFrameShape(QTextBrowser.Shape.NoFrame)
+        # Narrow dock: a small list indent and even paragraph spacing.
+        self.document().setIndentWidth(14)
+        self.document().setDefaultStyleSheet(
+            "h3 { margin: 0 0 6px 0; } p { margin: 0 0 8px 0; } li { margin-bottom: 4px; } "
+            "ul { margin: 0 0 8px 0; }"
+        )
 
     def show_stage(self, key: str) -> None:
-        self.setHtml(STAGE_HELP.get(key, "") + "<p><i>Press F1 for the full user guide.</i></p>")
+        self.setHtml(
+            STAGE_HELP.get(key, "")
+            + "<p style='color:#596675'><i>Press F1 for the full user guide.</i></p>"
+        )
 
 
 DOCUMENTS = {

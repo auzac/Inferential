@@ -74,6 +74,15 @@ ENCODINGS = ["utf-8", "utf-8-sig", "cp1252", "latin-1", "utf-16"]
 NONE_ITEM = "(none)"
 
 
+def step_title(number: int, total: int, title: str) -> str:
+    """Rich-text wizard title: a small "Step n of m" line above the title."""
+    return (
+        f"<span style='font-size:8.5pt; font-weight:600; color:{TOKENS['accent']};'>"
+        f"Step {number} of {total}</span><br>"
+        f"<span style='font-size:12pt; font-weight:600; color:{TOKENS['text']};'>{title}</span>"
+    )
+
+
 @dataclass
 class ImportPlan:
     source: DataSource
@@ -224,6 +233,7 @@ class ReadPage(QWizardPage):
         self.error.setWordWrap(True)
         self.error.setStyleSheet(f"color:{TOKENS['error']}")
         self.table = DataTableView(sortable=False)
+        self.table.verticalHeader().setVisible(False)
 
         top = QHBoxLayout()
         top.addWidget(self.csv_box)
@@ -435,6 +445,7 @@ class TimePage(QWizardPage):
             "analyzer data; the id is kept with each sample for traceability."
         )
         self.preview = DataTableView(sortable=False)
+        self.preview.verticalHeader().setVisible(False)
         self.status = QLabel()
         self.status.setWordWrap(True)
 
@@ -684,6 +695,9 @@ class FinishPage(QWizardPage):
         super().__init__()
         self.s = state
         self.setTitle("Duplicate timestamps and summary")
+        self.setSubTitle(
+            "Choose what to do with rows that share a timestamp, check the summary, then Finish."
+        )
         self.policy = QComboBox()
         self.summary = QLabel()
         self.summary.setWordWrap(True)
@@ -790,6 +804,11 @@ class ImportWizard(QWizard):
             self.finish_page,
         ):
             self.addPage(page)
+        # Titles carry a step counter, styled like the page headers of the main window.
+        self.setTitleFormat(Qt.TextFormat.RichText)
+        pages = [self.page(i) for i in self.pageIds()]
+        for n, page in enumerate(pages, start=1):
+            page.setTitle(step_title(n, len(pages), page.title()))
 
         if initial is not None:
             self._prefill(initial)

@@ -47,3 +47,14 @@ def test_recent_projects_deduplicated_and_limited():
     assert len(s.recent_projects) == MAX_RECENT
     assert s.recent_projects[0].endswith("5.imsproj")
     assert len(set(s.recent_projects)) == MAX_RECENT
+
+
+def test_window_layout_fields_roundtrip_and_validate():
+    s = AppSettings(window_geometry="AdnQywAD", help_panel=False)
+    save_settings(s)
+    assert load_settings() == s
+    settings_path().write_text(
+        json.dumps({"window_geometry": 5, "help_panel": "yes"}), encoding="utf-8"
+    )
+    loaded = load_settings()
+    assert loaded.window_geometry == "" and loaded.help_panel is None

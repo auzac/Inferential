@@ -10,7 +10,7 @@ while pinned, hover updates are ignored.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QFrame,
     QGroupBox,
@@ -20,6 +20,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+PREFERRED_HEIGHT = 220
+MIN_HEIGHT = 110
 
 
 class CursorReadout(QGroupBox):
@@ -51,9 +54,14 @@ class CursorReadout(QGroupBox):
         layout.addWidget(self.time_label)
         layout.addWidget(self._scroll, 1)
 
-        # Static box: content grows inside the scroll area, never the group.
-        self.setFixedHeight(220)
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        # Static box: content grows inside the scroll area, never the group. It is 220 px tall
+        # when the page has room and gives up to 90 px to the variable list on short screens.
+        self.setMinimumHeight(MIN_HEIGHT)
+        self.setMaximumHeight(PREFERRED_HEIGHT)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt override
+        return QSize(super().sizeHint().width(), PREFERRED_HEIGHT)  # never depends on content
 
     def show_hover(self, time_text: str, values: dict[str, str]) -> None:
         """Display the values of all series at the hovered time (ignored while pinned)."""

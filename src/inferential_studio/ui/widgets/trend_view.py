@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import warnings
 from dataclasses import dataclass
+from html import escape
 
 import numpy as np
 import pyqtgraph as pg
@@ -46,6 +47,8 @@ POINTS_MAX = 5000  # markers drawn for sparse point series (lab samples)
 HIGHLIGHT_COLOUR = (0, 114, 178)  # drag-to-zoom band, matching the cleaning page's range
 MIN_DRAG_PX = 6  # shorter drags are treated as clicks, not zooms
 PIN_COLOUR = "#0072B2"  # vertical line marking the pinned point in time
+HEADER_HEIGHT = 16  # px of the per-chart name header
+HEADER_TEXT = "#3b4754"
 
 
 @dataclass
@@ -137,10 +140,10 @@ class TrendView(QWidget):
         self.fit_button = QPushButton("Fit all")
         self.fit_button.setToolTip("Show all data")
         self.fit_button.clicked.connect(self.fit_all)
-        self.hint = QLabel("Drag to zoom · click to pin · right-click to copy or save")
+        self.hint = QLabel("Drag to zoom, click to pin, right-click to copy or save")
         self.hint.setToolTip(
-            "Drag across a chart to zoom to that period · wheel zooms · middle-drag pans · "
-            "click pins the values at a time · right-click copies or saves the charts"
+            "Drag across a chart to zoom to that period. The wheel zooms, middle-drag pans, a "
+            "click pins the values at a time, and right-click copies or saves the charts."
         )
         self.hint.setObjectName("placeholderNote")
         # Clip rather than widen the toolbar when the window is narrow.
@@ -273,8 +276,8 @@ class TrendView(QWidget):
         tidy_plot(plot)  # no PyQtGraph menu or "A" button (Fit all is the toolbar's)
         plot.showGrid(x=True, y=True, alpha=0.15)
         plot.getAxis("left").setWidth(AXIS_WIDTH)
-        plot.addLegend(offset=(5, 5), labelTextSize="8pt", brush=(255, 255, 255, 210))
-        # Names are in the legend; the axis shows only units to keep labels short.
+        # Names sit in a slim header above each chart (never on top of the data); the axis
+        # shows only units to keep labels short.
         plot.setLabel("left", units_label)
         vline = pg.InfiniteLine(
             angle=90, movable=False, pen=pg.mkPen("#888888", style=Qt.PenStyle.DashLine)
@@ -463,6 +466,21 @@ class TrendView(QWidget):
                 plot.addItem(lo)
                 plot.addItem(hi)
                 items[name] = (lo, hi, signature)
+        self._set_header(plot, group)
+
+    def _set_header(self, plot: pg.PlotItem, group: list[TrendSeries]) -> None:
+        """One-line chart header: a colour key and the name of each series, left-aligned."""
+        parts = []
+        for s in group:  # units are on the y-axis already
+            mark = "●" if s.points else "━"
+            parts.append(
+                f"<span style='color:{self._colour_for(s.name)}'>{mark}</span>&nbsp;{escape(s.name)}"
+            )
+        plot.setTitle(
+            "&nbsp;&nbsp;&nbsp;".join(parts), size="8pt", color=HEADER_TEXT, justify="left"
+        )
+        plot.titleLabel.setMaximumHeight(HEADER_HEIGHT)
+        plot.layout.setRowFixedHeight(0, HEADER_HEIGHT)
 
     @staticmethod
     def _subsample_points(s: TrendSeries) -> tuple[np.ndarray, np.ndarray]:

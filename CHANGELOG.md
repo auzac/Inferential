@@ -3,6 +3,31 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## v0.5.4 — Interface finish (2026-10-12)
+
+### Changed
+- **Laptop screens**: the Help panel starts closed below 1600 px of screen width (open on wide
+  screens) and is one click away as **Help panel** on the menu bar (Shift+F1). Button rows wrap
+  instead of clipping, the message panel and the *At cursor* box give up height on short
+  screens, and pages have lower minimum sizes.
+- **The window remembers** its size, position and the Help panel choice between sessions; the
+  first start sizes it to the screen.
+- **Charts**: series names sit on the chart's title line with a colour mark (●, ━, ┄) instead
+  of a legend box over the data; titles are left-aligned in one style. Empty charts show a
+  message saying what is missing (e.g. *Train models on Model Setup…*, or why loadings do not
+  apply to MLR) instead of bare 0–1 axes, and long messages wrap. Trend lanes get the same
+  one-line header (units stay on the y-axis).
+- **Validation**: the model comparison table is exactly as tall as its rows; *Diagnostics for*
+  and its metrics now sit with the diagnostic charts they describe.
+- Tables no longer show a grey band under the last row.
+- Calmer window chrome: *Stage 2 of 9*, *Step 3 of 5* and *Messages* in sentence case; the
+  open project's name (and "unsaved changes") under the application name on the left.
+- Import wizard: step counter on every page, no row numbers in previews. Rule dialog: a visible
+  ✕ to remove a condition, guidance instead of a red error while a rule is incomplete.
+- Smaller fixes: the coefficient chart lost its axes after a re-train; the anomaly review row
+  no longer hides a button under the table (double-click an event to zoom to it); batch
+  prediction options have short names.
+
 ## v0.5.3 — Exploration and polish (2026-10-12)
 
 ### Changed
