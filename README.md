@@ -108,6 +108,7 @@ licenses/                 LGPL/GPL v3 texts shipped with the application
 
 ## Documentation
 
+- [STRUCTURE.md](STRUCTURE.md) — what each file does and where to find things
 - [docs/user-guide.md](docs/user-guide.md) — how to use the application
 - [docs/methodology.md](docs/methodology.md) — time, import, exclusion, alignment, split, model and metric definitions
 - [docs/benchmarks.md](docs/benchmarks.md) — measured import, statistics, alignment and training performance
