@@ -86,13 +86,40 @@ are flagged.
 All offered filters (rolling mean, rolling median, EWMA) are **trailing** and time-based.
 Centered smoothing is not offered for deployable pipelines.
 
-## Exclusions
+## Exclusions and cleaning
 
-- Raw imported data is never modified or deleted.
-- Manual exclusion intervals are **closed** intervals `[start, end]` in UTC.
-- An interval with no listed signals is an operating-regime (global) exclusion; with listed
-  signals it affects only those variables. A sample becomes ineligible for modelling if any
-  variable it requires is excluded over its feature window (Milestone 2–3).
+- Raw imported data is never modified or deleted. Exclusions are masks over the normalized
+  data, recomputed from definitions stored in the project, so they are reproducible and
+  reversible (every edit is undoable).
+- **Manual intervals** are **closed** `[start, end]` in UTC. With no listed variables they are
+  operating-regime exclusions (whole rows, every variable, including target samples); with
+  listed variables they affect only those variables.
+- **Rules** are typed condition trees (variable, whitelisted operator, value(s)) combined with
+  AND/OR, evaluated with NumPy; no text is ever evaluated as code. They run on the process
+  data's own timestamps; nothing is interpolated. Comparisons are False where a value is
+  missing; `is missing` = no valid number; `is invalid` = the cell held status text.
+  *Minimum duration*: consecutive rows where the condition holds form a run; a time gap longer
+  than 2× the typical interval ends a run; a run lasts `last − first + typical interval`.
+  A rule either **excludes** (whole rows or listed variables) or only **flags** for review.
+- **Detectors** (z-score, robust MAD z-score, IQR, Hampel, rate of change, flatline,
+  engineering limits, status text) produce *events* (contiguous flagged samples of one
+  variable). Definitions are in `core/quality.py`. Defaults are deliberately conservative.
+  Statistics for z/MAD/IQR can be fitted on a chosen period so that, once a test period exists,
+  it does not influence thresholds.
+- **Review**: an event is *pending* until the user accepts it (excluded for that variable only)
+  or rejects it (kept as valid — e.g. a genuine process upset). Pending flags are highlighted
+  but **never exclude data**. A detector can opt in to *auto-exclude*, still reviewable. A
+  pending event lying entirely inside data already excluded for another reason is reported as
+  "inside an excluded period" and not counted as awaiting review. Decisions are stored by
+  detector, variable and event time span; editing a detector's settings clears its decisions
+  (after confirmation) because its events may change.
+- One authoritative mask per variable = regime exclusions ∪ variable-specific intervals ∪
+  variable-scoped rules ∪ accepted/auto flags. Each reason stays a separate category for the
+  summary ("why is this excluded?"). A flag on one variable never invalidates another
+  variable's value at the same time.
+- Lab target samples are excluded by regime intervals, intervals naming the target, and
+  accepted target flags. Whether a sample has enough valid process history behind it (rules,
+  coverage, feature windows) is decided during alignment in Milestone 3.
 
 ## Synthetic example data
 

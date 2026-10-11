@@ -180,7 +180,7 @@ def test_project_integrity_errors(mutate, message):
 
 def test_exclusion_signals_must_exist():
     t = datetime(2026, 1, 1, tzinfo=UTC)
-    with pytest.raises(SchemaError, match="unknown signal"):
+    with pytest.raises(SchemaError, match="unknown variable"):
         _project(
             exclusions=[ExclusionInterval(start=t, end=t + timedelta(hours=1), signals=("Nope",))]
         )

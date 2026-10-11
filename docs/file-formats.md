@@ -1,6 +1,6 @@
 # File formats
 
-## Project file (`.imsproj`), schema version 2
+## Project file (`.imsproj`), schema version 3
 
 A ZIP archive with exactly these entries:
 
@@ -24,8 +24,9 @@ Rules:
   files (relative if the data sits inside the new project folder, absolute otherwise).
 
 Schema history: **1** (v0.0.1) initial; **2** (v0.1.0) adds `TimestampKind.native` (date/time
-cells), `DataSource.duplicate_policy` and `DataSource.sample_id_column`. Version 1 files are
-upgraded automatically on opening (no data changes needed).
+cells), `DataSource.duplicate_policy` and `DataSource.sample_id_column`; **3** (v0.2.0) adds `rules`
+(typed condition trees), `detectors` and `flag_decisions`. Older files are upgraded
+automatically on opening (no data changes needed).
 
 ## Supported input files
 

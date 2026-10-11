@@ -1,7 +1,7 @@
 # User guide
 
-This guide grows with each release. It covers what works in **v0.1.0**: projects, data import
-and raw exploration (stages 1–2). Stages 3–9 show a note saying which milestone delivers them.
+This guide grows with each release. It covers what works in **v0.2.0**: projects, data import,
+raw exploration and cleaning (stages 1–3). Stages 4–9 show which milestone delivers them.
 
 ## 1. Start with the example
 
@@ -74,7 +74,37 @@ Statistics are calculated in the background when you open the page. Tick variabl
 Raw correlations are often dominated by shutdowns and load changes. They show association, not
 causation — clean the data first (Milestone 2) before choosing predictors.
 
-## 5. Projects
+## 5. Clean the data (Cleaning & Exclusions)
+
+Nothing you do here deletes data: exclusions are stored as definitions and can be switched
+off, edited or undone (**Edit → Undo**, Ctrl+Z).
+
+- **View**: *Raw* (original values), *Flagged* (original values; grey bands = excluded for all
+  variables, orange = excluded for that variable only, red dots = flagged and awaiting your
+  review), *Cleaned* (excluded points removed).
+- **Exclude a period by hand**: **Select range**, drag the blue band's edges on any chart (all
+  charts follow), then **Exclude selection…**. Choose a reason (shutdown, startup, transition,
+  instrument/analyzer fault, maintenance, operator judgement, other), whether it applies to all
+  variables or only some, and add a note. Start/end can be typed to the second. The *Manual
+  exclusions* tab lists them; untick to restore, double-click to edit, *Zoom to* to inspect.
+- **Rules** — *Add rule…* opens a visual builder: pick variable, operator (`<`, `<=`, `>`,
+  `>=`, `==`, `!=`, between, outside, is missing, is invalid) and value(s). Use groups for
+  combinations such as `(Feed_Flow < 50) AND (Pressure > 3)` or `(A < 1 OR B > 2) AND C < 3`.
+  Optionally require the condition to hold continuously for a minimum time. The dialog shows
+  how many rows match before you save. Rules can exclude whole rows (operating regime), only
+  selected variables, or just flag for review. Untick a rule to see the data without it.
+- **Anomaly detection** — *Add recommended* sets up a conservative spike filter (Hampel) and a
+  stuck-value check (flatline) on candidate predictors, a status-text check where text cells
+  exist, engineering limits where defined, and a robust z-score on the target. Each method's
+  dialog explains in plain words what it does. Detection runs in the background. Then review the
+  events: **Accept** (bad data — excluded for that variable), **Reject** (valid — e.g. a real
+  feed disturbance), **Reset**. *Zoom to* (or double-click) shows an event on the chart.
+  Real disturbances and turndowns are often valid data: an outlier is not automatically bad.
+- **Summary** — per variable: valid, excluded, pending review and usable values; per reason:
+  rows and approximate hours. The status bar shows the share of rows excluded for all
+  variables.
+
+## 6. Projects
 
 - **Save / Save As** write a `.imsproj` file holding all settings and references to your data
   files (with checksums). Saving is atomic, so an interrupted save cannot damage the previous
