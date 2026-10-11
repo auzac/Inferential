@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from inferential_studio.infrastructure.settings import AppSettings
 from inferential_studio.ui.main_window import MainWindow
+from inferential_studio.ui.pages.eda_page import EdaPage
 from inferential_studio.ui.pages.import_page import ImportPage
 from inferential_studio.ui.pages.stage_page import PlaceholderPage
 from inferential_studio.ui.stages import STAGES
@@ -39,34 +40,58 @@ def example_copy(tmp_path):
     return dest
 
 
+def open_and_wait(qtbot, window, path) -> None:
+    with qtbot.waitSignal(window.tasks.task_ended, timeout=30000):
+        assert window.open_project_file(path)
+
+
 def test_shell_has_nine_stages_and_navigation(window):
     assert window.sidebar.count() == len(STAGES) == 9
     assert isinstance(window.stack.currentWidget(), ImportPage)
+    window.sidebar.setCurrentRow(1)
+    assert isinstance(window.stack.currentWidget(), EdaPage)
     window.sidebar.setCurrentRow(6)
     page = window.stack.currentWidget()
     assert isinstance(page, PlaceholderPage) and page.stage.key == "training"
     assert window.windowTitle().startswith("Untitled project")
-    assert not window.act_import.isEnabled()  # honest: import is not implemented yet
+    assert window.act_import.isEnabled()
+    assert window.lbl_records.text() == "Process records: —"
 
 
 def test_new_project_uses_display_timezone_from_settings(window):
     assert window.session.project.display_timezone == "Asia/Singapore"
 
 
-def test_open_sample_project(window, example_copy):
-    assert window.open_project_file(example_copy / "sample_project.imsproj")
-    assert window.errors == []  # source files present with matching checksums
-    assert window.session.project.target.name == "Product_Composition"
-    assert window.lbl_exclusions.text() == "Manual exclusions: 2"
-    overview = window.pages["import"].overview
-    assert overview.topLevelItem(0).text(1) == "Synthetic distillation example"
+def test_open_sample_project_loads_data_in_background(qtbot, window, example_copy):
+    open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
+    assert window.errors == []
+    data = window.session.data
+    assert set(data.sources) == {"process", "lab"}
+    assert window.lbl_records.text() == "Process records: 40,320"
+    assert window.lbl_samples.text() == "Lab samples: 316"
+    page = window.pages["import"]
+    assert page.sources.rowCount() == 2 and page.sources.item(0, 6).text() == "OK"
     assert "sample_project.imsproj" in window.windowTitle()
 
 
-def test_open_reports_changed_source_file(window, example_copy):
-    (example_copy / "tower_process.csv").write_text("tampered\n")
-    assert window.open_project_file(example_copy / "sample_project.imsproj")
+def test_changed_source_reported_and_can_be_accepted(qtbot, window, example_copy, monkeypatch):
+    csv = example_copy / "tower_process.csv"
+    csv.write_bytes(csv.read_bytes().replace(b"104.59", b"104.60", 1))
+    answers = []
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: answers.append(1) or QMessageBox.StandardButton.Yes
+    )
+    with qtbot.waitSignal(window.tasks.task_ended, timeout=30000):
+        window.open_project_file(example_copy / "sample_project.imsproj")
     assert window.errors and "checksum mismatch" in window.errors[0][1]
+    assert "process" in window.session.data.failures and "lab" in window.session.data.sources
+    assert answers  # user was asked whether to accept the new contents
+    qtbot.waitUntil(lambda: "process" in window.session.data.sources, timeout=30000)
+    assert window.session.dirty  # new checksum recorded in the project
+    assert (
+        window.session.project.source("process").sha256
+        == window.session.data.sources["process"].sha256
+    )
 
 
 def test_open_corrupt_project_shows_error(window, tmp_path):
@@ -77,24 +102,35 @@ def test_open_corrupt_project_shows_error(window, tmp_path):
     assert window.session.path is None
 
 
-def test_save_as_and_reopen(window, example_copy, tmp_path):
-    window.open_project_file(example_copy / "sample_project.imsproj")
+def test_save_as_elsewhere_keeps_sources_reachable(qtbot, window, example_copy, tmp_path):
+    open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
     window.session.mark_dirty()
     assert window.isWindowModified()
-    out = tmp_path / "saved"  # extension added automatically
-    assert window.save_project_to(out)
+    out_dir = tmp_path / "elsewhere"
+    assert window.save_project_to(out_dir / "saved")  # extension added automatically
     assert not window.isWindowModified()
-    assert (tmp_path / "saved.imsproj").exists()
     assert window.settings.recent_projects[0].endswith("saved.imsproj")
 
     reopened = MainWindow(AppSettings())
-    try:
-        reopened.show_error = lambda *a, **k: None
-        assert reopened.open_project_file(tmp_path / "saved.imsproj")
-        assert reopened.session.project.features == window.session.project.features
-        assert reopened.session.project.exclusions == window.session.project.exclusions
-    finally:
-        reopened.close()
+    qtbot.addWidget(reopened)
+    reopened.errors = []
+    reopened.show_error = lambda title, msg, details="": reopened.errors.append(msg)
+    open_and_wait(qtbot, reopened, out_dir / "saved.imsproj")
+    assert reopened.errors == []
+    assert set(reopened.session.data.sources) == {"process", "lab"}
+    assert reopened.session.project.features == window.session.project.features
+    assert reopened.session.project.exclusions == window.session.project.exclusions
+
+
+def test_remove_source(qtbot, window, example_copy, monkeypatch):
+    open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    window._remove_source("lab")
+    project = window.session.project
+    assert [s.source_id for s in project.sources] == ["process"]
+    assert project.target is None
+    assert "lab" not in window.session.data.sources
+    assert window.session.dirty
 
 
 def test_generate_example_in_background(window, qtbot, tmp_path, monkeypatch):
@@ -107,3 +143,36 @@ def test_generate_example_in_background(window, qtbot, tmp_path, monkeypatch):
     assert (tmp_path / "ex" / "sample_project.imsproj").exists()
     assert window.act_open.isEnabled()
     assert not window.task_widget.isVisible()
+
+
+def test_eda_page_computes_in_background(qtbot, window, example_copy):
+    open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
+    eda: EdaPage = window.pages["initial_eda"]
+    with qtbot.waitSignal(window.tasks.task_ended, timeout=30000):
+        window.sidebar.setCurrentRow(1)
+    qtbot.waitUntil(lambda: eda._result is not None, timeout=10000)
+    assert eda.stats_table.model_.rowCount() == 8
+    assert eda.var_list.count() == 8
+    assert len(eda.trends.plots) == 5  # 4 checked variables + lab target markers
+    assert eda._result.xy is not None
+    eda.heatmap.cell_clicked.emit("Tray_15_Temp", "Tray_20_Temp")
+    assert "r = " in eda.pair_note.text()
+    eda.search.setText("tray")
+    visible = [
+        eda.var_list.item(i).text()
+        for i in range(eda.var_list.count())
+        if not eda.var_list.item(i).isHidden()
+    ]
+    assert all("Tray" in v for v in visible) and len(visible) == 2
+
+
+def test_project_settings_change_display_timezone(qtbot, window):
+    from inferential_studio.ui.project_dialog import ProjectSettingsDialog
+
+    dialog = ProjectSettingsDialog(window.session.project, window)
+    qtbot.addWidget(dialog)
+    dialog.timezone.setCurrentText("Europe/London")
+    dialog.name.setText("Column C-101")
+    assert dialog.apply_to(window.session.project)
+    assert window.session.project.display_timezone == "Europe/London"
+    assert not dialog.apply_to(window.session.project)  # no change the second time

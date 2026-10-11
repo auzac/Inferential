@@ -379,6 +379,7 @@ def build_sample_project(
             result_timestamp=TimestampSpec(
                 column="Result_Timestamp", format=LAB_TIME_FORMAT, source_timezone=tz
             ),
+            sample_id_column="Sample_ID",
         ),
     ]
     predictors = ["Tray_15_Temp", "Tray_20_Temp", "Column_Pressure", "Reboiler_Duty", "Reflux_Flow"]

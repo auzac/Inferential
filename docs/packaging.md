@@ -13,7 +13,7 @@ one-folder application with PyInstaller (`packaging/pyinstaller.spec`), launches
 `--smoke-test`, and writes `packaging/output/InferentialModelStudio-<version>-win64.zip` plus a
 `.sha256` checksum.
 
-Status at v0.0.1: the spec has been built and smoke-tested **on Linux** (bundle ≈ 334 MB,
+Status at v0.1.0: the spec has been built and smoke-tested **on Linux** (bundle ≈ 349 MB,
 launches and opens the sample project). The PowerShell script and the Windows build have
 **not yet been run on Windows**.
 

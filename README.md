@@ -5,9 +5,11 @@ inferential models (soft sensors), starting with distillation columns.
 
 Python · PySide6 (Qt 6) · PyQtGraph · pandas · scikit-learn. No cloud services, no telemetry.
 
-> **Status: v0.0.1 — Milestone 0 (engineering foundation).** The application shell, project
-> file format, background-task infrastructure, logging, settings and synthetic example data
-> work. Data import arrives in Milestone 1; stages 2–9 show what they will deliver and when.
+> **Status: v0.1.0 — Milestone 1 (import and raw exploration).** CSV/Excel import with a
+> timestamp wizard, validation reports, background data loading and the initial EDA page
+> (trends, statistics, correlations, coverage) work. Cleaning and exclusions arrive in
+> Milestone 2; later stages show which milestone delivers them. See the
+> [user guide](docs/user-guide.md).
 
 ## Quick start (Windows, PowerShell)
 
@@ -60,6 +62,10 @@ src/inferential_studio/
   core/                   pure Python, never imports Qt (usable from Jupyter / Seeq Data Lab)
     schemas.py            typed project configuration + strict JSON conversion
     persistence.py        .imsproj read/write: atomic saves, safe loading, migrations
+    timestamps.py         timestamp format detection and parsing to UTC (no guessing)
+    importers.py          CSV/Excel reading, validation report, project data loading
+    dataset.py            raw and normalized data layers
+    statistics.py         descriptive statistics, correlations, coverage, X–Y screening
     synthetic.py          synthetic distillation dataset with ground truth
     tasks.py              progress/cancellation primitives for long-running functions
   infrastructure/         logging, per-user settings, paths, background TaskManager (Qt)
@@ -89,7 +95,9 @@ licenses/                 LGPL/GPL v3 texts shipped with the application
 
 ## Documentation
 
-- [docs/methodology.md](docs/methodology.md) — time, window, causality and exclusion conventions
+- [docs/user-guide.md](docs/user-guide.md) — how to use the application
+- [docs/methodology.md](docs/methodology.md) — time, import, window, causality and exclusion conventions
+- [docs/benchmarks.md](docs/benchmarks.md) — measured import and statistics performance
 - [docs/file-formats.md](docs/file-formats.md) — project file and example data formats
 - [docs/packaging.md](docs/packaging.md) — Windows build, licensing obligations
 - [LICENSES.md](LICENSES.md) — third-party notices

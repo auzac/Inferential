@@ -28,7 +28,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # history: 1 = M0; 2 = native timestamps, duplicate policy, sample ids
 
 
 class SchemaError(ValueError):
@@ -48,6 +48,16 @@ class TimestampKind(StrEnum):
     EXCEL_SERIAL = "excel_serial"
     UNIX_SECONDS = "unix_seconds"
     UNIX_MILLISECONDS = "unix_milliseconds"
+    NATIVE = "native"  # the file already stores date/time cells (e.g. Excel dates)
+
+
+class DuplicatePolicy(StrEnum):
+    """What to do when several rows share a timestamp."""
+
+    ERROR = "error"  # refuse until the user decides (process default)
+    KEEP_FIRST = "keep_first"
+    MEAN = "mean"  # average numeric values of rows with the same time
+    KEEP_ALL = "keep_all"  # keep separate rows; lab sources only (replicate samples)
 
 
 class VariableRole(StrEnum):
@@ -123,6 +133,18 @@ def new_id() -> str:
     return uuid.uuid4().hex
 
 
+def _coerce_enum(obj: object, name: str, enum: type[StrEnum], *, optional: bool = False) -> None:
+    """Accept enum members or their string values (e.g. from Qt widgets) on frozen dataclasses."""
+    value = getattr(obj, name)
+    if value is None and optional:
+        return
+    try:
+        object.__setattr__(obj, name, enum(value))
+    except ValueError as exc:
+        allowed = ", ".join(m.value for m in enum)
+        raise SchemaError(f"'{value}' is not a valid {name}; expected one of: {allowed}.") from exc
+
+
 def _finite(value: float | None, what: str, *, allow_none: bool = True) -> None:
     if value is None:
         if not allow_none:
@@ -147,6 +169,7 @@ class TimestampSpec:
     excel_date_system: int | None = None  # 1900 or 1904, for EXCEL_SERIAL
 
     def __post_init__(self) -> None:
+        _coerce_enum(self, "kind", TimestampKind)
         if not self.column:
             raise SchemaError("Timestamp column name must not be empty.")
         validate_timezone(self.source_timezone)
@@ -169,8 +192,12 @@ class DataSource:
     encoding: str = "utf-8"
     decimal: str = "."
     header_row: int = 0
+    duplicate_policy: DuplicatePolicy | None = None  # None = default for the source kind
+    sample_id_column: str | None = None  # lab only
 
     def __post_init__(self) -> None:
+        _coerce_enum(self, "kind", SourceKind)
+        _coerce_enum(self, "duplicate_policy", DuplicatePolicy, optional=True)
         if not self.source_id:
             raise SchemaError("Source id must not be empty.")
         if not self.path:
@@ -181,6 +208,27 @@ class DataSource:
             raise SchemaError("Header row must be >= 0.")
         if self.decimal not in (".", ","):
             raise SchemaError("Decimal separator must be '.' or ','.")
+        if self.kind is SourceKind.PROCESS and self.duplicate_policy is DuplicatePolicy.KEEP_ALL:
+            raise SchemaError(
+                "Process data needs one row per timestamp; 'keep all' is for lab data."
+            )
+        if self.sample_id_column is not None and self.kind is not SourceKind.LAB:
+            raise SchemaError("Only lab sources have a sample id column.")
+
+    @property
+    def effective_duplicate_policy(self) -> DuplicatePolicy:
+        if self.duplicate_policy is not None:
+            return self.duplicate_policy
+        return DuplicatePolicy.KEEP_ALL if self.kind is SourceKind.LAB else DuplicatePolicy.ERROR
+
+    @property
+    def timestamp_columns(self) -> tuple[str, ...]:
+        cols = [self.timestamp.column]
+        if self.result_timestamp is not None:
+            cols.append(self.result_timestamp.column)
+        if self.sample_id_column is not None:
+            cols.append(self.sample_id_column)
+        return tuple(cols)
 
 
 # --------------------------------------------------------------------------- variables
@@ -198,6 +246,7 @@ class VariableMeta:
     eng_high: float | None = None
 
     def __post_init__(self) -> None:
+        _coerce_enum(self, "role", VariableRole)
         if not self.name:
             raise SchemaError("Variable name must not be empty.")
         _finite(self.eng_low, f"{self.name}: engineering low limit")
@@ -216,6 +265,7 @@ class FilterSpec:
     halflife_s: float | None = None  # EWMA: time-based half-life
 
     def __post_init__(self) -> None:
+        _coerce_enum(self, "kind", FilterKind)
         _finite(self.window_s, "Filter window")
         _finite(self.halflife_s, "EWMA half-life")
         rolling = self.kind in (FilterKind.ROLLING_MEAN, FilterKind.ROLLING_MEDIAN)
@@ -252,6 +302,8 @@ class FeatureSpec:
     max_gap_s: float | None = None  # longest permitted run of missing data inside the window
 
     def __post_init__(self) -> None:
+        _coerce_enum(self, "placement", WindowPlacement)
+        _coerce_enum(self, "aggregation", Aggregation)
         if not self.variable:
             raise SchemaError("Feature must reference a variable.")
         for value, what in (
@@ -311,6 +363,7 @@ class ExclusionInterval:
     interval_id: str = field(default_factory=new_id)
 
     def __post_init__(self) -> None:
+        _coerce_enum(self, "reason", ExclusionReason)
         object.__setattr__(self, "start", ensure_utc(self.start, "Exclusion start"))
         object.__setattr__(self, "end", ensure_utc(self.end, "Exclusion end"))
         object.__setattr__(self, "created_at", ensure_utc(self.created_at, "Creation time"))

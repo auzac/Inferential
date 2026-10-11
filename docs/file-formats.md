@@ -1,6 +1,6 @@
 # File formats
 
-## Project file (`.imsproj`), schema version 1
+## Project file (`.imsproj`), schema version 2
 
 A ZIP archive with exactly these entries:
 
@@ -16,9 +16,29 @@ Rules:
 - Data source paths may be **relative to the project file's folder** (used by the example) or
   absolute. Each source records the SHA-256 of the file at import; a mismatch on opening is
   reported to the user.
-- In schema version 1 the project references the original data files (reference mode). Embedded
-  ("portable") data and fitted model artifacts are added in later milestones with an explicit
-  schema migration.
+- The project references the original data files (reference mode). On opening, the files are
+  read again in the background; a changed checksum is reported and the user decides whether to
+  accept the new contents. Embedded ("portable") data and fitted model artifacts are added in
+  later milestones with an explicit schema migration.
+- *Save As* to another folder rewrites relative source paths so they still point at the same
+  files (relative if the data sits inside the new project folder, absolute otherwise).
+
+Schema history: **1** (v0.0.1) initial; **2** (v0.1.0) adds `TimestampKind.native` (date/time
+cells), `DataSource.duplicate_policy` and `DataSource.sample_id_column`. Version 1 files are
+upgraded automatically on opening (no data changes needed).
+
+## Supported input files
+
+| Type | Notes |
+|---|---|
+| CSV / TSV / TXT | Delimiter `,` `;` tab `|`; encodings UTF-8 (with/without BOM), cp1252, latin-1, UTF-16; decimal point or comma (no thousands separators); header on any line (lines above are skipped) |
+| Excel `.xlsx` / `.xlsm` | Any worksheet and header row; date cells, Excel serial numbers (1900 or 1904 system) or text timestamps |
+| Legacy `.xls` | Not supported — save as `.xlsx` |
+
+Timestamp formats: ISO 8601 (with or without `T`, fractional seconds, `Z`/offsets);
+`dd/mm/yyyy`, `mm/dd/yyyy`, `yyyy/mm/dd` with `/`, `-` or `.` separators and 2- or 4-digit
+years; month names (`11-Oct-2026`, `Oct 11, 2026`); 24-hour or AM/PM times with optional
+seconds and fractions; Excel serial dates; Unix seconds or milliseconds.
 
 Reading is strict and safe:
 

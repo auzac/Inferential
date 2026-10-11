@@ -203,8 +203,14 @@ def _check_manifest(manifest: Any, filename: str) -> None:
 
 # --------------------------------------------------------------------------- migrations
 
+
+def _v1_to_v2(project_data: Any) -> Any:
+    """v2 only added optional fields with defaults; v1 data is valid as-is."""
+    return project_data
+
+
 # Map "from version" -> function converting project JSON to version + 1.
-_MIGRATIONS: dict[int, Any] = {}
+_MIGRATIONS: dict[int, Any] = {1: _v1_to_v2}
 
 
 def migrate(project_data: Any, from_version: int) -> Any:
@@ -236,6 +242,28 @@ def resolve_source_path(source: DataSource, project_path: str | os.PathLike[str]
     if path.is_absolute() or project_path is None:
         return path
     return Path(project_path).parent / path
+
+
+def rebase_source_paths(
+    project: Project,
+    old_project_path: str | os.PathLike[str] | None,
+    new_project_path: str | os.PathLike[str],
+) -> Project:
+    """Return a copy whose source paths still point at the same files after "Save As".
+
+    Files inside the new project folder (or below it) are stored relative to it, so the folder
+    can be moved as a whole; anything else is stored as an absolute path.
+    """
+    new_dir = Path(new_project_path).resolve().parent
+    sources = []
+    for source in project.sources:
+        absolute = resolve_source_path(source, old_project_path).resolve()
+        try:
+            path = absolute.relative_to(new_dir).as_posix()
+        except ValueError:
+            path = str(absolute)
+        sources.append(replace(source, path=path))
+    return replace(project, sources=sources)
 
 
 def verify_source(source: DataSource, project_path: str | os.PathLike[str] | None) -> str | None:

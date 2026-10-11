@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -168,3 +169,38 @@ def test_source_resolution_and_verification(tmp_path):
     assert "checksum mismatch" in verify_source(src, project_file)
     data.unlink()
     assert "not found" in verify_source(src, project_file)
+
+
+def test_rebase_source_paths_on_save_as(tmp_path):
+    from inferential_studio.core.persistence import rebase_source_paths
+
+    old_dir, new_dir, other = tmp_path / "a", tmp_path / "a" / "sub" / "b", tmp_path / "c"
+    old_dir.mkdir()
+    src_in_old = DataSource(
+        source_id="p", kind=SourceKind.PROCESS, path="data.csv", timestamp=TimestampSpec(column="t")
+    )
+    project = Project(sources=[src_in_old])
+    rebased = rebase_source_paths(project, old_dir / "p.imsproj", other / "q.imsproj")
+    assert Path(rebased.sources[0].path) == (old_dir / "data.csv").resolve()  # outside -> absolute
+    inside = rebase_source_paths(project, old_dir / "p.imsproj", old_dir / "q.imsproj")
+    assert inside.sources[0].path == "data.csv"  # same folder -> stays relative
+    deeper = rebase_source_paths(
+        Project(sources=[replace(src_in_old, path=str(new_dir / "x.csv"))]),
+        None,
+        new_dir.parent / "r.imsproj",
+    )
+    assert deeper.sources[0].path == "b/x.csv"
+
+
+def test_schema_v1_file_is_migrated(tmp_path, project):
+    """Files saved by v0.0.1 (schema 1) open in later versions."""
+    data = to_jsonable(project)
+    for src in data["sources"]:  # fields that did not exist in schema 1
+        src.pop("duplicate_policy")
+        src.pop("sample_id_column")
+    path = _write_zip(
+        tmp_path / "old.imsproj", {"manifest.json": _manifest(1), "project.json": json.dumps(data)}
+    )
+    loaded = load_project(path)
+    assert loaded.source("lab").sample_id_column is None
+    assert loaded.source("process").effective_duplicate_policy.value == "error"
