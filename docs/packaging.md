@@ -10,11 +10,12 @@ powershell -ExecutionPolicy Bypass -File packaging\windows_build.ps1
 
 The script creates `.venv-build` from `requirements-lock.txt`, runs the test suite, builds the
 one-folder application with PyInstaller (`packaging/pyinstaller.spec`), launches the exe with
-`--smoke-test`, and writes `packaging/output/InferentialModelStudio-<version>-win64.zip` plus a
+`--smoke-test` (creates the main window and aligns + trains all four model types on a small
+synthetic dataset, so missing bundled numerics fail the build), and writes `packaging/output/InferentialModelStudio-<version>-win64.zip` plus a
 `.sha256` checksum.
 
-Status at v0.1.0: the spec has been built and smoke-tested **on Linux** (bundle ≈ 349 MB,
-launches and opens the sample project). The PowerShell script and the Windows build have
+Status at v0.4.0: the spec has been built and smoke-tested **on Linux** (bundle ≈ 349 MB;
+the smoke test trains MLR, PLS, PCR and Ridge inside the frozen bundle). The PowerShell script and the Windows build have
 **not yet been run on Windows**.
 
 ## Why one-folder, no UPX

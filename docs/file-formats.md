@@ -1,13 +1,13 @@
 # File formats
 
-## Project file (`.imsproj`), schema version 3
+## Project file (`.imsproj`), schema version 4
 
 A ZIP archive with exactly these entries:
 
 | Entry | Content |
 |---|---|
 | `manifest.json` | `format` = `"inferential-model-studio-project"`, `schema_version`, `app_version`, `saved_at` (UTC ISO 8601), `libraries` (Python, NumPy, pandas, SciPy, scikit-learn versions) |
-| `project.json` | The project configuration (see `core/schemas.py`): name, display timezone, data sources, variables, per-predictor feature settings, manual exclusions, notes, created/modified times |
+| `project.json` | The project configuration (see `core/schemas.py`): name, display timezone, data sources, variables, per-predictor feature settings, manual exclusions, rules, detectors, flag decisions, alignment options, modelling configuration (scaling, split, CV, candidate models), notes, created/modified times |
 
 Rules:
 
@@ -25,8 +25,11 @@ Rules:
 
 Schema history: **1** (v0.0.1) initial; **2** (v0.1.0) adds `TimestampKind.native` (date/time
 cells), `DataSource.duplicate_policy` and `DataSource.sample_id_column`; **3** (v0.2.0) adds `rules`
-(typed condition trees), `detectors` and `flag_decisions`. Older files are upgraded
-automatically on opening (no data changes needed).
+(typed condition trees), `detectors` and `flag_decisions`; **4** (v0.3.0/v0.4.0) adds
+`alignment` (regime-overlap option) and `modelling` (scaling, chronological split, purge gap,
+CV, candidate models and hyperparameter search). Older files are upgraded automatically on
+opening (defaults are used for the new sections). Trained models are not stored; they are
+recomputed from the saved settings.
 
 ## Supported input files
 

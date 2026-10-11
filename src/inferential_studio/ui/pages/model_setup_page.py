@@ -288,13 +288,14 @@ class ModelSetupPage(StagePage):
         ll.addStretch(1)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(left)
 
         # -- split preview ------------------------------------------------------------
         self.split_plot = plot_widget(
             "Lab samples by period", time_axis=session.project.display_timezone
         )
-        legend(self.split_plot)
+        legend(self.split_plot, "bottom-right")
         self.split_note = note_label()
         self.problems = note_label()
         right = QWidget()

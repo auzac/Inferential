@@ -21,10 +21,12 @@ Windows reference PC (spec §12). Re-run with the commands below on that PC and 
 | Synthetic example (40,320 rows × 8): full project load | 0.7 s | |
 | Detectors: Hampel + flatline on 20 tags (v0.2.0) | 23.5 s | |
 | Exclusion masks: intervals, a 2-condition rule with minimum duration, detector events (v0.2.0) | 0.44 s | |
+| Feature alignment, 20 predictors × 8,332 lab samples, 30-min mean windows (v0.4.0) | 0.66 s | ≈ 380 MB |
+| Same with median windows (per-window loop) (v0.4.0) | 3.3 s | |
+| Training MLR + PLS + PCR + Ridge with 5-fold expanding CV tuning, 8,332 × 20 (v0.4.0) | 1.0 s | |
 
-All steps except the exclusion masks run in a background task. Masks are recomputed on the
-GUI thread after each cleaning edit (under 0.5 s at this size); move them to a background task
-if larger datasets make editing feel sluggish. Trend charts draw with
+All of these steps run in background tasks (exclusion masks and feature alignment are
+recomputed automatically and coalesced after edits since v0.2.1 / v0.4.0). Trend charts draw with
 peak-preserving downsampling, so plotting time does not grow with the number of rows.
 
 ## How to reproduce
@@ -46,4 +48,22 @@ src = DataSource(source_id="p", kind=SourceKind.PROCESS, path="big.csv", delimit
 t = time.time(); data = import_source(src); print("import", time.time() - t)
 t = time.time(); norm = data.normalized; print("normalize", time.time() - t)
 t = time.time(); compute_eda(norm.values, norm.text_mask); print("eda", time.time() - t)
+```
+
+Feature alignment and training (v0.4.0), continuing from the frame above:
+
+```python
+from inferential_studio.core.features import TargetSamples, build_feature_matrix
+from inferential_studio.core.models import train_models
+from inferential_studio.core.schemas import FeatureSpec, ModellingConfig
+
+frame = norm.values
+times = frame.index[200::120]  # a lab sample every 2 h
+rng = np.random.default_rng(1)
+target = TargetSamples("y", times, rng.normal(size=len(times)),
+                       np.zeros(len(times), bool), np.zeros(len(times), bool))
+specs = [FeatureSpec(c, window_s=1800, deadtime_s=1200) for c in frame.columns]
+t = time.time(); fm = build_feature_matrix(target, frame, specs); print("align", time.time() - t)
+fm.y[:] = fm.X.sum(axis=1).to_numpy() + rng.normal(size=len(fm.y))
+t = time.time(); train_models(fm, ModellingConfig()); print("train", time.time() - t)
 ```

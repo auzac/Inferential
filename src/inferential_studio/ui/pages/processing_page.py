@@ -148,6 +148,7 @@ class ProcessingPage(StagePage):
         self._tasks = tasks
         self._undo = undo_stack
         self._sample = 0  # selected lab sample (row of the feature matrix)
+        self._preview_stale = True
         self._lag: LagScan | None = None
 
         # -- settings table -------------------------------------------------------
@@ -532,7 +533,16 @@ class ProcessingPage(StagePage):
         self._sample = value - 1
         self._preview_timer.start()
 
+    def showEvent(self, event) -> None:  # noqa: N802, ANN001
+        super().showEvent(event)
+        if self._preview_stale:
+            self._preview_timer.start()
+
     def _update_preview(self) -> None:
+        # Drawing a long raw series costs time: only the page on screen redraws.
+        self._preview_stale = not self.isVisible()
+        if self._preview_stale:
+            return
         self.x_plot.clear()
         self.y_plot.clear()
         name = self.current_variable()
