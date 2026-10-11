@@ -1,5 +1,4 @@
 """Main application window: sidebar stage navigation, page stack, properties panel, status bar."""
-
 from __future__ import annotations
 
 import logging
@@ -11,6 +10,7 @@ import PySide6
 from PySide6.QtCore import QSize, Qt, QUrl, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QDockWidget,
     QFileDialog,
     QLabel,
@@ -45,34 +45,31 @@ from inferential_studio.ui.stages import STAGES
 from inferential_studio.ui.widgets.task_progress import TaskProgressWidget
 
 log = logging.getLogger(__name__)
-
 PROJECT_FILTER = f"Inferential Model Studio project (*{PROJECT_EXTENSION})"
 
 
+
 class MainWindow(QMainWindow):
+
     def __init__(self, settings: AppSettings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.settings = settings
         self.session = ProjectSession(self)
         self.tasks = TaskManager(self)
         self.undo_stack = QUndoStack(self)
-
         self.setMinimumSize(QSize(960, 640))
         self.resize(1280, 800)
-
         self._build_actions()
         self._build_menus_and_toolbar()
         self._build_central()
         self._build_properties_panel()
         self._build_status_bar()
-
         self.session.changed.connect(self._refresh_status)
         self.session.data_changed.connect(self._refresh_status)
         self._load_generation = 0
         self.session.dirty_changed.connect(self.setWindowModified)
         self.session.path_changed.connect(lambda _p: self._update_title())
         self.tasks.busy_changed.connect(self._on_busy_changed)
-
         self.session.new(Project(display_timezone=settings.display_timezone))
 
     # ------------------------------------------------------------------ construction
@@ -87,7 +84,6 @@ class MainWindow(QMainWindow):
                 act.setStatusTip(tip)
             act.triggered.connect(slot)
             return act
-
         self.act_new = action(
             "&New Project",
             self.new_project,
@@ -133,7 +129,6 @@ class MainWindow(QMainWindow):
             "Open &Log Folder", self._open_log_folder, None, "Show the application log files"
         )
         self.act_about = action(f"&About {APP_NAME}", self._about)
-
         self.act_undo = self.undo_stack.createUndoAction(self, "&Undo")
         self.act_undo.setShortcut(QKeySequence.StandardKey.Undo)
         self.act_redo = self.undo_stack.createRedoAction(self, "&Redo")
@@ -153,16 +148,12 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.act_project)
         file_menu.addSeparator()
         file_menu.addAction(self.act_exit)
-
         edit_menu = bar.addMenu("&Edit")
         edit_menu.addActions([self.act_undo, self.act_redo])
-
         tools_menu = bar.addMenu("&Tools")
         tools_menu.addActions([self.act_settings, self.act_logs])
-
         help_menu = bar.addMenu("&Help")
         help_menu.addAction(self.act_about)
-
         toolbar = QToolBar("Main", self)
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
@@ -177,11 +168,21 @@ class MainWindow(QMainWindow):
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
 
     def _build_central(self) -> None:
-        self.sidebar = QListWidget()
+        self.sidebar = QListWidget(self)
         self.sidebar.setObjectName("sidebar")
         self.sidebar.setFixedWidth(230)
         self.sidebar.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-
+        # Stable item geometry prevents text clipping when Windows DPI scaling
+        # or a Qt stylesheet changes the rendered font/padding.
+        self.sidebar.setUniformItemSizes(True)
+        self.sidebar.setSpacing(2)
+        self.sidebar.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.sidebar.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.sidebar.setVerticalScrollMode(
+            QAbstractItemView.ScrollMode.ScrollPerPixel
+        )
         self.stack = QStackedWidget()
         self.pages: dict[str, StagePage] = {}
         for stage in STAGES:
@@ -197,15 +198,16 @@ class MainWindow(QMainWindow):
                 page = PlaceholderPage(stage)
             self.pages[stage.key] = page
             self.stack.addWidget(page)
-
             item = QListWidgetItem(f"{stage.number}.  {stage.title}")
+            # Use an explicit row height rather than relying on QSS padding
+            # to expand QListWidget's cached size hints.
+            item.setSizeHint(QSize(0, 40))
             item.setData(Qt.ItemDataRole.UserRole, stage.key)
             item.setToolTip(f"{stage.goal}\n(Delivered in Milestone {stage.milestone})")
             self.sidebar.addItem(item)
-
         self.sidebar.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.sidebar.setCurrentRow(0)
-
+        self.sidebar.scrollToTop()
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.sidebar)
         splitter.addWidget(self.stack)
@@ -245,6 +247,7 @@ class MainWindow(QMainWindow):
         self.setWindowModified(self.session.dirty)
 
     @Slot()
+
     def _refresh_status(self) -> None:
         project, data = self.session.project, self.session.data
         loaded = bool(data.sources)
@@ -258,6 +261,7 @@ class MainWindow(QMainWindow):
         self._update_title()
 
     @Slot(bool)
+
     def _on_busy_changed(self, busy: bool) -> None:
         # Project-changing actions are disabled while a background task runs.
         for act in (self.act_new, self.act_open, self.act_save, self.act_save_as, self.act_import):
@@ -290,6 +294,7 @@ class MainWindow(QMainWindow):
         return answer == QMessageBox.StandardButton.Discard
 
     @Slot()
+
     def new_project(self) -> None:
         if not self.maybe_save():
             return
@@ -439,6 +444,7 @@ class MainWindow(QMainWindow):
         )
 
     @Slot(str)
+
     def _remove_source(self, source_id: str) -> None:
         answer = QMessageBox.question(
             self,
@@ -462,6 +468,7 @@ class MainWindow(QMainWindow):
         return True
 
     @Slot()
+
     def _open_dialog(self) -> None:
         if not self.maybe_save():
             return
@@ -472,12 +479,14 @@ class MainWindow(QMainWindow):
             self.open_project_file(path)
 
     @Slot()
+
     def _save(self) -> bool:
         if self.session.path is None:
             return self._save_as_dialog()
         return self.save_project_to(self.session.path)
 
     @Slot()
+
     def _save_as_dialog(self) -> bool:
         start = str(
             Path(self.settings.last_directory or Path.home())
@@ -492,6 +501,7 @@ class MainWindow(QMainWindow):
         save_settings(self.settings)
 
     @Slot()
+
     def _populate_recent(self) -> None:
         self.recent_menu.clear()
         if not self.settings.recent_projects:
@@ -521,6 +531,7 @@ class MainWindow(QMainWindow):
         )
 
     @Slot()
+
     def _generate_example_dialog(self) -> None:
         default = (
             Path(self.settings.last_directory or Path.home()) / "InferentialModelStudio Example"
@@ -544,6 +555,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ tools / help
 
     @Slot()
+
     def _settings_dialog(self) -> None:
         dialog = SettingsDialog(self.settings, self)
         if dialog.exec():
@@ -556,16 +568,19 @@ class MainWindow(QMainWindow):
             save_settings(self.settings)
 
     @Slot()
+
     def _project_dialog(self) -> None:
         dialog = ProjectSettingsDialog(self.session.project, self)
         if dialog.exec() and dialog.apply_to(self.session.project):
             self.session.mark_dirty()
 
     @Slot()
+
     def _open_log_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir())))
 
     @Slot()
+
     def _about(self) -> None:
         QMessageBox.about(
             self,
