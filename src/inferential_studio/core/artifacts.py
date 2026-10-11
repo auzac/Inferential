@@ -442,15 +442,15 @@ def predict(
         outside = (ranges["min"].to_numpy() > X) | (ranges["max"].to_numpy() < X)
     outside &= ok[:, None]
     status = np.where(ok, PRED_OK, PRED_INPUT).astype(object)
-    reasons = []
     st = fm.status[names].to_numpy()
-    for i in range(n):
-        if ok[i]:
-            reasons.append("")
-        else:
-            reasons.append(
-                "; ".join(f"{names[j]}: {st[i, j]}" for j in range(len(names)) if st[i, j] != OK)
-            )
+    reasons = np.full(n, "", dtype=object)
+    for i in np.flatnonzero(~ok):  # only rows without a prediction need an explanation
+        reasons[i] = "; ".join(
+            f"{names[j]}: {st[i, j]}" for j in range(len(names)) if st[i, j] != OK
+        )
+    outside_text = np.full(n, "", dtype=object)
+    for i in np.flatnonzero(outside.any(axis=1)):
+        outside_text[i] = ", ".join(names[j] for j in np.flatnonzero(outside[i]))
     table = pd.DataFrame(
         {
             "time": times,
@@ -458,9 +458,7 @@ def predict(
             "status": status,
             "reason": reasons,
             "n_outside_training_range": outside.sum(axis=1),
-            "outside_training_range": [
-                ", ".join(names[j] for j in np.flatnonzero(row)) for row in outside
-            ],
+            "outside_training_range": outside_text,
         }
     )
     for j, name in enumerate(names):

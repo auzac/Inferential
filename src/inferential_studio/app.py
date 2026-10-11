@@ -76,12 +76,70 @@ def main(argv: list[str] | None = None) -> int:
         QTimer.singleShot(0, window.offer_recovery)  # after the window is on screen
     if args.smoke_test:
         _numeric_self_check()
-        log.info("Smoke test: main window created; exiting")
-        QTimer.singleShot(0, app.quit)
+        if args.project:
+            _workflow_smoke_test(window, app)  # open → align → train → model card, then exit
+        else:
+            log.info("Smoke test: main window created; exiting")
+            QTimer.singleShot(0, app.quit)
 
     code = app.exec()
     log.info("%s exiting with code %s", APP_NAME, code)
     return int(code)
+
+
+def _workflow_smoke_test(window, app) -> None:  # noqa: ANN001
+    """With a project: wait for its data and features, train, write the model card, exit.
+
+    Exit code 0 only if every step succeeded within the time limit (used by installer tests).
+    """
+    import time
+
+    from PySide6.QtCore import QTimer
+
+    from inferential_studio.infrastructure.paths import log_dir
+
+    log = logging.getLogger(__name__)
+    deadline = time.monotonic() + 180
+    state = {"trained": False}
+    timer = QTimer(window)
+
+    def fail(reason: str) -> None:
+        log.error("Smoke test failed: %s", reason)
+        timer.stop()
+        app.exit(3)
+
+    def step() -> None:
+        session = window.session
+        if time.monotonic() > deadline:
+            return fail("timed out")
+        if window.tasks.busy:
+            return
+        if session.data.failures:
+            return fail(f"data could not be loaded: {list(session.data.failures)}")
+        if not state["trained"]:
+            if session.features is None:
+                if session.features_error and session.cleaning is not None and session.data.sources:
+                    return fail(session.features_error)
+                return
+            state["trained"] = True
+            window.run_training()
+            return
+        run = session.training
+        if run is None:
+            return
+        page = window.pages["export"]
+        page.refresh()
+        out = log_dir().parent / "smoke-model-card.html"
+        if not any(m.ok for m in run.models) or page.save_report(out) is None:
+            return fail("no model could be trained or the model card could not be written")
+        log.info("Smoke test: workflow completed; model card at %s", out)
+        timer.stop()
+        app.exit(0)
+
+    # Never block on an error dialog in an unattended run: fail with the message instead.
+    window.show_error = lambda title, message, details="": fail(f"{title}: {message}")
+    timer.timeout.connect(step)
+    timer.start(200)
 
 
 def _numeric_self_check() -> None:

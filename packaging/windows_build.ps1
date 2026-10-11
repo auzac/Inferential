@@ -7,16 +7,18 @@
 
         powershell -ExecutionPolicy Bypass -File packaging\windows_build.ps1
 
-    Steps: create/refresh .venv-build with the pinned dependencies, run PyInstaller,
-    launch the built exe with --smoke-test, then zip the folder and write a SHA-256 checksum.
-    The Windows installer (Inno Setup) is added in Milestone 5.
+    Steps: create/refresh .venv-build with the pinned dependencies, run the tests, run
+    PyInstaller, launch the built exe with --smoke-test, zip the folder (portable build), then
+    build the per-user installer with Inno Setup 6 (if ISCC.exe is found) and run the installer
+    smoke test (silent install, launch, uninstall). SHA-256 checksums are written for both.
 
     NOTE: written and syntax-reviewed on Linux; it has NOT been executed on Windows yet.
 #>
 [CmdletBinding()]
 param(
     [string]$Python = "py",
-    [string]$PythonVersion = "-3.12"
+    [string]$PythonVersion = "-3.12",
+    [string]$Iscc = ""   # path to ISCC.exe; default: PATH, then the usual install folders
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,7 +73,30 @@ Compress-Archive -Path (Join-Path $Out "dist\$AppName") -DestinationPath $Zip
 $Hash = (Get-FileHash -Algorithm SHA256 $Zip).Hash.ToLower()
 "$Hash  $(Split-Path $Zip -Leaf)" | Set-Content -Encoding ascii "$Zip.sha256"
 
+if (-not $Iscc) {
+    $cmd = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+    if ($cmd) { $Iscc = $cmd.Source }
+    foreach ($candidate in @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe")) {
+        if (-not $Iscc -and (Test-Path $candidate)) { $Iscc = $candidate }
+    }
+}
+$Setup = $null
+if ($Iscc) {
+    Write-Host "== Building installer with $Iscc"
+    Invoke-Checked $Iscc @("/Qp", "/DAppVersion=$Version", "/DSourceDir=$(Join-Path $Out "dist\$AppName")", "packaging\installer\InferentialModelStudio.iss")
+    $Setup = Join-Path $Out "$AppName-$Version-setup-win64.exe"
+    if (-not (Test-Path $Setup)) { throw "Inno Setup did not produce $Setup" }
+    $SetupHash = (Get-FileHash -Algorithm SHA256 $Setup).Hash.ToLower()
+    "$SetupHash  $(Split-Path $Setup -Leaf)" | Set-Content -Encoding ascii "$Setup.sha256"
+    Write-Host "== Installer smoke test"
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "installer_smoke_test.ps1") -Installer $Setup
+    if ($LASTEXITCODE -ne 0) { throw "Installer smoke test failed" }
+} else {
+    Write-Warning "Inno Setup 6 (ISCC.exe) not found: installer not built. Install it from https://jrsoftware.org/isinfo.php or pass -Iscc."
+}
+
 Write-Host ""
 Write-Host "Build OK: $Exe"
 Write-Host "Archive:  $Zip"
 Write-Host "SHA-256:  $Hash"
+if ($Setup) { Write-Host "Installer: $Setup" }
