@@ -34,6 +34,7 @@ class TrendView(QWidget):
     """Stacked or unit-grouped plots sharing one time axis."""
 
     x_range_changed = Signal(float, float)
+    rebuilt = Signal()  # plots were recreated; owners re-add their overlays
 
     def __init__(self, timezone: str = "UTC", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -55,6 +56,7 @@ class TrendView(QWidget):
         self.readout.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         bar = QHBoxLayout()
+        self.toolbar_layout = bar
         bar.addWidget(self.mode)
         bar.addWidget(self.fit_button)
         bar.addWidget(self.readout, 1)
@@ -84,16 +86,41 @@ class TrendView(QWidget):
             if isinstance(axis, TzDateAxisItem):
                 axis.set_timezone(timezone)
 
-    def set_series(self, series: list[TrendSeries]) -> None:
+    def set_series(self, series: list[TrendSeries], *, keep_range: bool = False) -> None:
+        """Replace the plotted series. ``keep_range`` preserves the current zoom."""
+        previous = self.x_range() if keep_range and self._series else None
         self._series = list(series)
         self._rebuild()
+        if previous is not None and self.plots:
+            self.set_x_range(*previous)
+
+    def set_x_range(self, lo: float, hi: float) -> None:
+        if self.plots:
+            self.plots[0].setXRange(lo, hi, padding=0)
+
+    def visible_x_range(self) -> tuple[float, float] | None:
+        """The time range on screen (the data extent while auto-ranging)."""
+        if not self.plots:
+            return None
+        if self.plots[0].vb.autoRangeEnabled()[0]:
+            xs = [s.x for s in self._series if len(s.x)]
+            if not xs:
+                return None
+            return float(min(x[0] for x in xs)), float(max(x[-1] for x in xs))
+        lo, hi = self.plots[0].viewRange()[0]
+        return lo, hi
+
+    @property
+    def groups(self) -> list[tuple[pg.PlotItem, list[TrendSeries]]]:
+        return list(zip(self.plots, self._plot_series, strict=True))
 
     def fit_all(self) -> None:
         for plot in self.plots:
             plot.enableAutoRange()
 
     def x_range(self) -> tuple[float, float] | None:
-        if not self.plots:
+        """Current visible time range, or None while the view is still auto-ranging to fit all data."""
+        if not self.plots or self.plots[0].vb.autoRangeEnabled()[0]:
             return None
         lo, hi = self.plots[0].viewRange()[0]
         return lo, hi
@@ -166,6 +193,7 @@ class TrendView(QWidget):
             lambda _vb, r: self.x_range_changed.emit(float(r[0]), float(r[1]))
         )
         self.fit_all()
+        self.rebuilt.emit()
 
     # ------------------------------------------------------------------ crosshair
 

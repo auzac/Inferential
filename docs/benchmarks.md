@@ -11,7 +11,7 @@ Windows reference PC (spec §12). Re-run with the commands below on that PC and 
 | Python / pandas / NumPy | 3.12.3 / 3.0.6 / 2.5.4 |
 | Dataset | 1,000,000 rows × 20 numeric tags, 1-minute timestamps `dd/mm/yyyy HH:MM`, CSV 165 MB |
 
-## Results (v0.1.0, 2026-10-11)
+## Results (2026-10-11)
 
 | Step | Time | Peak memory (process) |
 |---|---|---|
@@ -19,8 +19,12 @@ Windows reference PC (spec §12). Re-run with the commands below on that PC and 
 | Normalize (sort, duplicate policy) | 2.1 s | |
 | EDA statistics (summary, Pearson, exact Spearman, coverage) | 7.5 s | ≈ 820 MB |
 | Synthetic example (40,320 rows × 8): full project load | 0.7 s | |
+| Detectors: Hampel + flatline on 20 tags (v0.2.0) | 23.5 s | |
+| Exclusion masks: intervals, a 2-condition rule with minimum duration, detector events (v0.2.0) | 0.44 s | |
 
-All of these run in a background task; the window stays responsive. Trend charts draw with
+All steps except the exclusion masks run in a background task. Masks are recomputed on the
+GUI thread after each cleaning edit (under 0.5 s at this size); move them to a background task
+if larger datasets make editing feel sluggish. Trend charts draw with
 peak-preserving downsampling, so plotting time does not grow with the number of rows.
 
 ## How to reproduce

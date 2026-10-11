@@ -28,7 +28,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SCHEMA_VERSION = 2  # history: 1 = M0; 2 = native timestamps, duplicate policy, sample ids
+SCHEMA_VERSION = 3  # 1 = M0; 2 = native timestamps, duplicate policy, sample ids; 3 = rules, detectors, flag reviews
 
 
 class SchemaError(ValueError):
@@ -376,6 +376,266 @@ class ExclusionInterval:
         return not self.signals
 
 
+# --------------------------------------------------------------------------- exclusion rules
+
+
+class RuleOperator(StrEnum):
+    LT = "<"
+    LE = "<="
+    GT = ">"
+    GE = ">="
+    EQ = "=="
+    NE = "!="
+    BETWEEN = "between"  # lo <= x <= hi
+    OUTSIDE = "outside"  # x < lo or x > hi
+    IS_MISSING = "is missing"  # no valid number (blank or text)
+    IS_INVALID = "is invalid"  # the cell held non-numeric text such as "Bad"
+
+
+RANGE_OPERATORS = frozenset({RuleOperator.BETWEEN, RuleOperator.OUTSIDE})
+VALUELESS_OPERATORS = frozenset({RuleOperator.IS_MISSING, RuleOperator.IS_INVALID})
+
+
+class Combinator(StrEnum):
+    AND = "and"
+    OR = "or"
+
+
+class RuleAction(StrEnum):
+    EXCLUDE = "exclude"
+    FLAG = "flag"  # highlight for review only
+
+
+@dataclass(frozen=True)
+class Condition:
+    """One comparison on one variable, e.g. ``Feed_Flow < 50`` or ``Pressure between 2 and 4``."""
+
+    variable: str
+    operator: RuleOperator
+    value: float | None = None
+    value2: float | None = None  # upper bound for between/outside
+
+    def __post_init__(self) -> None:
+        _coerce_enum(self, "operator", RuleOperator)
+        if not self.variable:
+            raise SchemaError("A condition needs a variable.")
+        op = self.operator
+        if op in VALUELESS_OPERATORS:
+            if self.value is not None or self.value2 is not None:
+                raise SchemaError(f"'{op.value}' takes no value.")
+            return
+        _finite(self.value, f"{self.variable} {op.value}: value", allow_none=False)
+        if op in RANGE_OPERATORS:
+            _finite(self.value2, f"{self.variable} {op.value}: upper value", allow_none=False)
+            if self.value2 < self.value:
+                raise SchemaError(
+                    f"{self.variable} {op.value}: the lower value must not exceed the upper value."
+                )
+        elif self.value2 is not None:
+            raise SchemaError(f"'{op.value}' takes a single value.")
+
+    def describe(self) -> str:
+        op = self.operator
+        if op in VALUELESS_OPERATORS:
+            return f"{self.variable} {op.value}"
+        if op in RANGE_OPERATORS:
+            return f"{self.variable} {op.value} {self.value:g} and {self.value2:g}"
+        return f"{self.variable} {op.value} {self.value:g}"
+
+
+@dataclass(frozen=True)
+class ConditionGroup:
+    """Conditions (or nested groups) combined with one AND/OR."""
+
+    items: tuple[Condition | ConditionGroup, ...]
+    combinator: Combinator = Combinator.AND
+
+    def __post_init__(self) -> None:
+        _coerce_enum(self, "combinator", Combinator)
+        object.__setattr__(self, "items", tuple(self.items))
+        if not self.items:
+            raise SchemaError("A rule needs at least one condition.")
+
+    def variables(self) -> set[str]:
+        out: set[str] = set()
+        for item in self.items:
+            out |= {item.variable} if isinstance(item, Condition) else item.variables()
+        return out
+
+    def describe(self, top: bool = True) -> str:
+        parts = [
+            f"({item.describe()})"
+            if isinstance(item, Condition) and len(self.items) > 1
+            else item.describe()
+            if isinstance(item, Condition)
+            else f"({item.describe(top=False)})"
+            for item in self.items
+        ]
+        return f" {self.combinator.value.upper()} ".join(parts)
+
+
+@dataclass(frozen=True)
+class ExclusionRule:
+    """A reusable logical exclusion, evaluated on the process data's own timestamps.
+
+    ``signals`` empty = operating-regime rule that excludes whole rows (every variable);
+    otherwise only the listed variables are excluded where the condition holds.
+    ``min_duration_s``: the condition must hold continuously at least this long (see
+    docs/methodology.md for how gaps end a run).
+    """
+
+    name: str
+    condition: ConditionGroup
+    action: RuleAction = RuleAction.EXCLUDE
+    reason: ExclusionReason = ExclusionReason.OTHER
+    signals: tuple[str, ...] = ()
+    min_duration_s: float | None = None
+    enabled: bool = True
+    note: str = ""
+    author: str = ""
+    created_at: datetime = field(default_factory=utc_now)
+    rule_id: str = field(default_factory=new_id)
+
+    def __post_init__(self) -> None:
+        _coerce_enum(self, "action", RuleAction)
+        _coerce_enum(self, "reason", ExclusionReason)
+        object.__setattr__(self, "signals", tuple(self.signals))
+        object.__setattr__(self, "created_at", ensure_utc(self.created_at, "Rule creation time"))
+        if not self.name.strip():
+            raise SchemaError("A rule needs a name.")
+        _finite(self.min_duration_s, f"Rule '{self.name}': minimum duration")
+        if self.min_duration_s is not None and self.min_duration_s <= 0:
+            raise SchemaError(f"Rule '{self.name}': minimum duration must be positive.")
+
+    def describe(self) -> str:
+        text = self.condition.describe()
+        if self.min_duration_s:
+            text += f" for at least {self.min_duration_s / 60:g} min"
+        return text
+
+
+# --------------------------------------------------------------------------- anomaly detection
+
+
+class DetectorKind(StrEnum):
+    ZSCORE = "zscore"
+    MAD = "mad"  # robust (modified) z-score
+    IQR = "iqr"
+    HAMPEL = "hampel"
+    RATE_OF_CHANGE = "rate_of_change"
+    FLATLINE = "flatline"
+    LIMITS = "limits"  # physical / engineering limits
+    INVALID_TEXT = "invalid_text"  # cells that held status text such as "Bad"
+
+
+@dataclass(frozen=True)
+class DetectorConfig:
+    """Settings of one automatic data-quality detector. Results are flags for review by default."""
+
+    kind: DetectorKind
+    variables: tuple[str, ...]
+    threshold: float | None = None  # sigmas (z, MAD, Hampel) or IQR multiplier k
+    window_s: float | None = None  # Hampel window; flatline minimum duration
+    rate_per_min: float | None = None  # rate of change limit, units per minute
+    tolerance: float = 0.0  # flatline: changes up to this count as "no change"
+    low: float | None = None  # limits; None = use the variable's engineering limit
+    high: float | None = None
+    min_deviation: float = 0.0  # Hampel: ignore deviations smaller than this (units)
+    fit_start: datetime | None = None  # optional period for fitting statistics (z, MAD, IQR)
+    fit_end: datetime | None = None
+    auto_exclude: bool = False  # opt-in: treat every flag as accepted unless rejected
+    enabled: bool = True
+    detector_id: str = field(default_factory=new_id)
+
+    def __post_init__(self) -> None:
+        _coerce_enum(self, "kind", DetectorKind)
+        object.__setattr__(self, "variables", tuple(self.variables))
+        if not self.variables:
+            raise SchemaError("A detector needs at least one variable.")
+        for name in ("threshold", "window_s", "rate_per_min", "low", "high"):
+            _finite(getattr(self, name), name)
+        _finite(self.tolerance, "tolerance", allow_none=False)
+        _finite(self.min_deviation, "minimum deviation", allow_none=False)
+        k = self.kind
+        needs_threshold = k in (
+            DetectorKind.ZSCORE,
+            DetectorKind.MAD,
+            DetectorKind.IQR,
+            DetectorKind.HAMPEL,
+        )
+        if needs_threshold and (self.threshold is None or self.threshold <= 0):
+            raise SchemaError(f"{k.value}: the threshold must be positive.")
+        if k in (DetectorKind.HAMPEL, DetectorKind.FLATLINE) and (
+            self.window_s is None or self.window_s <= 0
+        ):
+            raise SchemaError(f"{k.value}: the window/duration must be positive.")
+        if k is DetectorKind.RATE_OF_CHANGE and (
+            self.rate_per_min is None or self.rate_per_min <= 0
+        ):
+            raise SchemaError("Rate of change: the limit must be positive.")
+        if self.tolerance < 0 or self.min_deviation < 0:
+            raise SchemaError("Tolerances cannot be negative.")
+        if self.low is not None and self.high is not None and self.low >= self.high:
+            raise SchemaError("Limits: low must be below high.")
+        for name in ("fit_start", "fit_end"):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, ensure_utc(value, name))
+        if self.fit_start and self.fit_end and self.fit_end <= self.fit_start:
+            raise SchemaError("The fitting period must end after it starts.")
+
+    def describe(self) -> str:
+        k = self.kind
+        if k is DetectorKind.ZSCORE:
+            return f"|z| > {self.threshold:g}"
+        if k is DetectorKind.MAD:
+            return f"robust |z| > {self.threshold:g}"
+        if k is DetectorKind.IQR:
+            return f"outside Q1/Q3 ± {self.threshold:g}·IQR"
+        if k is DetectorKind.HAMPEL:
+            return f"Hampel: > {self.threshold:g}σ from the {self.window_s / 60:g}-min local median"
+        if k is DetectorKind.RATE_OF_CHANGE:
+            return f"changes faster than {self.rate_per_min:g} units/min"
+        if k is DetectorKind.FLATLINE:
+            return f"unchanged (±{self.tolerance:g}) for ≥ {self.window_s / 60:g} min"
+        if k is DetectorKind.LIMITS:
+            lo = "eng. low" if self.low is None else f"{self.low:g}"
+            hi = "eng. high" if self.high is None else f"{self.high:g}"
+            return f"outside [{lo}, {hi}]"
+        return "cells holding status text"
+
+
+class FlagDecisionKind(StrEnum):
+    ACCEPTED = "accepted"  # confirmed bad: excluded for that variable
+    REJECTED = "rejected"  # confirmed valid (e.g. a genuine process upset): kept
+
+
+@dataclass(frozen=True)
+class FlagDecision:
+    """The user's review of one flagged event, identified by detector, variable and time span."""
+
+    detector_id: str
+    variable: str
+    start: datetime
+    end: datetime
+    decision: FlagDecisionKind
+    note: str = ""
+    author: str = ""
+    decided_at: datetime = field(default_factory=utc_now)
+
+    def __post_init__(self) -> None:
+        _coerce_enum(self, "decision", FlagDecisionKind)
+        object.__setattr__(self, "start", ensure_utc(self.start, "Flag start"))
+        object.__setattr__(self, "end", ensure_utc(self.end, "Flag end"))
+        object.__setattr__(self, "decided_at", ensure_utc(self.decided_at, "Decision time"))
+        if self.end < self.start:
+            raise SchemaError("A flag cannot end before it starts.")
+
+    @property
+    def key(self) -> tuple[str, str, datetime, datetime]:
+        return (self.detector_id, self.variable, self.start, self.end)
+
+
 # --------------------------------------------------------------------------- project
 
 
@@ -389,6 +649,9 @@ class Project:
     variables: list[VariableMeta] = field(default_factory=list)
     features: list[FeatureSpec] = field(default_factory=list)
     exclusions: list[ExclusionInterval] = field(default_factory=list)
+    rules: list[ExclusionRule] = field(default_factory=list)
+    detectors: list[DetectorConfig] = field(default_factory=list)
+    flag_decisions: list[FlagDecision] = field(default_factory=list)
     notes: str = ""
     created_at: datetime = field(default_factory=utc_now)
     modified_at: datetime = field(default_factory=utc_now)
@@ -442,10 +705,28 @@ class Project:
         for f in self.features:
             if f.variable not in predictor_names:
                 raise SchemaError(f"Feature '{f.variable}' does not refer to a predictor variable.")
-        for ex in self.exclusions:
-            unknown = [s for s in ex.signals if s not in names]
+        known = set(names)
+
+        def check(refs, what: str) -> None:  # noqa: ANN001
+            unknown = sorted(set(refs) - known)
             if unknown:
-                raise SchemaError(f"Exclusion refers to unknown signal(s): {', '.join(unknown)}.")
+                raise SchemaError(f"{what} refers to unknown variable(s): {', '.join(unknown)}.")
+
+        for ex in self.exclusions:
+            check(ex.signals, "An exclusion")
+        _require_unique([r.rule_id for r in self.rules], "rule id")
+        for rule in self.rules:
+            check(rule.signals, f"Rule '{rule.name}'")
+            check(rule.condition.variables(), f"Rule '{rule.name}'")
+        _require_unique([d.detector_id for d in self.detectors], "detector id")
+        for det in self.detectors:
+            check(det.variables, f"Detector '{det.kind.value}'")
+        detector_ids = {d.detector_id for d in self.detectors}
+        _require_unique([str(f.key) for f in self.flag_decisions], "flag decision")
+        for f in self.flag_decisions:
+            if f.detector_id not in detector_ids:
+                raise SchemaError("A flag decision refers to a detector that no longer exists.")
+            check([f.variable], "A flag decision")
 
 
 def _require_unique(values: list[str], what: str) -> None:

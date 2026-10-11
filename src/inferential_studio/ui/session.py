@@ -5,10 +5,13 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pandas as pd
 from PySide6.QtCore import QObject, Signal
 
 from inferential_studio.core.dataset import ProjectData, SourceData
+from inferential_studio.core.exclusions import CleaningState, compute_cleaning
 from inferential_studio.core.persistence import load_project, rebase_source_paths, save_project
+from inferential_studio.core.quality import DetectorResult
 from inferential_studio.core.schemas import DataSource, Project, SourceKind, VariableMeta
 
 
@@ -17,6 +20,11 @@ class ProjectSession(QObject):
     data_changed = Signal()  # imported data added, removed or reloaded
     dirty_changed = Signal(bool)
     path_changed = Signal(object)  # Path | None
+    cleaning_changed = Signal()  # exclusion masks recomputed
+    detectors_changed = Signal()  # detector configuration edited: results must be recomputed
+
+    # Project list attributes that cleaning edits replace wholesale (undo-friendly).
+    CLEANING_LISTS = ("exclusions", "rules", "detectors", "flag_decisions")
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -25,6 +33,10 @@ class ProjectSession(QObject):
         self._path: Path | None = None
         self._dirty = False
         self.data_version = 0  # increments whenever data changes; used to invalidate caches
+        self._frame_cache: tuple[int, pd.DataFrame, pd.DataFrame, pd.Series | None] | None = None
+        self.detector_results: dict[tuple[str, str], DetectorResult] = {}
+        self.detector_results_version = -1  # data version the results were computed for
+        self.cleaning: CleaningState | None = None
 
     # ------------------------------------------------------------------ state
 
@@ -77,6 +89,54 @@ class ProjectSession(QObject):
         self._set_dirty(True)
         self.changed.emit()
 
+    # ------------------------------------------------------------------ cleaning
+
+    def frames(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series | None]:
+        """(process values, text mask, target) for the current data, cached per data version."""
+        cache = self._frame_cache
+        if cache is None or cache[0] != self.data_version:
+            frame, mask = self._data.process_frame(self._project)
+            target = self._data.target_series(self._project)
+            cache = (self.data_version, frame, mask, target)
+            self._frame_cache = cache
+        return cache[1], cache[2], cache[3]
+
+    def set_lists(self, **lists: list) -> None:
+        """Replace whole project lists (used by undoable cleaning edits)."""
+        detectors_before = list(self._project.detectors)
+        unknown = set(lists) - set(self.CLEANING_LISTS)
+        if unknown:
+            raise ValueError(f"{sorted(unknown)} cannot be edited this way.")
+        replace(
+            self._project, **{k: list(v) for k, v in lists.items()}
+        )  # validates; raises before any change
+        for name, value in lists.items():
+            setattr(self._project, name, list(value))
+        self.mark_dirty()
+        if "detectors" in lists and lists["detectors"] != detectors_before:
+            self.detectors_changed.emit()
+        self.recompute_cleaning()
+
+    def set_detector_results(
+        self, results: dict[tuple[str, str], DetectorResult], version: int
+    ) -> None:
+        if version != self.data_version:
+            return  # stale: computed for data that has since changed
+        self.detector_results = results
+        self.detector_results_version = version
+        self.recompute_cleaning()
+
+    def recompute_cleaning(self) -> None:
+        frame, mask, target = self.frames()
+        if frame.empty:
+            self.cleaning = None
+        else:
+            results = (
+                self.detector_results if self.detector_results_version == self.data_version else {}
+            )
+            self.cleaning = compute_cleaning(self._project, frame, mask, results, target)
+        self.cleaning_changed.emit()
+
     # ------------------------------------------------------------------ data
 
     def set_data(self, data: ProjectData) -> None:
@@ -123,6 +183,21 @@ class ProjectSession(QObject):
         project.exclusions = [
             ex for ex in project.exclusions if not ex.signals or not set(ex.signals) & removed
         ]
+        project.rules = [
+            r for r in project.rules if not (set(r.signals) | r.condition.variables()) & removed
+        ]
+        kept_detectors = []
+        for det in project.detectors:
+            variables = tuple(v for v in det.variables if v not in removed)
+            if variables:
+                kept_detectors.append(replace(det, variables=variables))
+        project.detectors = kept_detectors
+        detector_ids = {d.detector_id for d in kept_detectors}
+        project.flag_decisions = [
+            f
+            for f in project.flag_decisions
+            if f.variable not in removed and f.detector_id in detector_ids
+        ]
         self._data.sources.pop(source_id, None)
         self._data.failures.pop(source_id, None)
         self.mark_dirty()
@@ -157,7 +232,9 @@ class ProjectSession(QObject):
 
     def _bump_data(self) -> None:
         self.data_version += 1
+        self.detector_results = {}
         self.data_changed.emit()
+        self.recompute_cleaning()
 
     def _set_dirty(self, dirty: bool) -> None:
         if dirty != self._dirty:

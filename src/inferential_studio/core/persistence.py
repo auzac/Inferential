@@ -209,8 +209,13 @@ def _v1_to_v2(project_data: Any) -> Any:
     return project_data
 
 
+def _v2_to_v3(project_data: Any) -> Any:
+    """v3 added rules, detectors and flag decisions (empty lists by default)."""
+    return project_data
+
+
 # Map "from version" -> function converting project JSON to version + 1.
-_MIGRATIONS: dict[int, Any] = {1: _v1_to_v2}
+_MIGRATIONS: dict[int, Any] = {1: _v1_to_v2, 2: _v2_to_v3}
 
 
 def migrate(project_data: Any, from_version: int) -> Any:

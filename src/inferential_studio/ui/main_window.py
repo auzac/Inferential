@@ -1,4 +1,5 @@
 """Main application window: sidebar stage navigation, page stack, properties panel, status bar."""
+
 from __future__ import annotations
 
 import logging
@@ -29,12 +30,14 @@ from inferential_studio.core import synthetic
 from inferential_studio.core.dataset import ProjectData, Severity, SourceData
 from inferential_studio.core.importers import SourceChangedError, import_source, load_project_data
 from inferential_studio.core.persistence import PROJECT_EXTENSION, ProjectFileError
+from inferential_studio.core.quality import run_detectors
 from inferential_studio.core.schemas import Project, SchemaError, SourceKind
 from inferential_studio.infrastructure.logging_config import LOG_FILE_NAME
 from inferential_studio.infrastructure.paths import log_dir
 from inferential_studio.infrastructure.settings import AppSettings, save_settings
 from inferential_studio.infrastructure.workers import TaskManager
 from inferential_studio.ui.import_wizard import ImportPlan, ImportWizard
+from inferential_studio.ui.pages.cleaning_page import CleaningPage
 from inferential_studio.ui.pages.eda_page import EdaPage
 from inferential_studio.ui.pages.import_page import ImportPage
 from inferential_studio.ui.pages.stage_page import PlaceholderPage, StagePage
@@ -48,9 +51,7 @@ log = logging.getLogger(__name__)
 PROJECT_FILTER = f"Inferential Model Studio project (*{PROJECT_EXTENSION})"
 
 
-
 class MainWindow(QMainWindow):
-
     def __init__(self, settings: AppSettings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.settings = settings
@@ -66,6 +67,9 @@ class MainWindow(QMainWindow):
         self._build_status_bar()
         self.session.changed.connect(self._refresh_status)
         self.session.data_changed.connect(self._refresh_status)
+        self.session.cleaning_changed.connect(self._refresh_status)
+        self.session.detectors_changed.connect(self.run_detection)
+        self.session.data_changed.connect(self._data_changed_detection)
         self._load_generation = 0
         self.session.dirty_changed.connect(self.setWindowModified)
         self.session.path_changed.connect(lambda _p: self._update_title())
@@ -84,6 +88,7 @@ class MainWindow(QMainWindow):
                 act.setStatusTip(tip)
             act.triggered.connect(slot)
             return act
+
         self.act_new = action(
             "&New Project",
             self.new_project,
@@ -176,13 +181,9 @@ class MainWindow(QMainWindow):
         # or a Qt stylesheet changes the rendered font/padding.
         self.sidebar.setUniformItemSizes(True)
         self.sidebar.setSpacing(2)
-        self.sidebar.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        self.sidebar.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.sidebar.setTextElideMode(Qt.TextElideMode.ElideRight)
-        self.sidebar.setVerticalScrollMode(
-            QAbstractItemView.ScrollMode.ScrollPerPixel
-        )
+        self.sidebar.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.stack = QStackedWidget()
         self.pages: dict[str, StagePage] = {}
         for stage in STAGES:
@@ -194,6 +195,9 @@ class MainWindow(QMainWindow):
                 page.remove_requested.connect(self._remove_source)
             elif stage.key == "initial_eda":
                 page = EdaPage(stage, self.session, self.tasks)
+            elif stage.key == "cleaning":
+                page = CleaningPage(stage, self.session, self.undo_stack, self.settings)
+                page.detection_requested.connect(self.run_detection)
             else:
                 page = PlaceholderPage(stage)
             self.pages[stage.key] = page
@@ -247,7 +251,6 @@ class MainWindow(QMainWindow):
         self.setWindowModified(self.session.dirty)
 
     @Slot()
-
     def _refresh_status(self) -> None:
         project, data = self.session.project, self.session.data
         loaded = bool(data.sources)
@@ -257,11 +260,17 @@ class MainWindow(QMainWindow):
         self.lbl_samples.setText(
             f"Lab samples: {data.n_lab_samples:,}" if loaded else "Lab samples: —"
         )
-        self.lbl_exclusions.setText(f"Manual exclusions: {len(project.exclusions)}")
+        state = self.session.cleaning
+        if state is None:
+            self.lbl_exclusions.setText(f"Manual exclusions: {len(project.exclusions)}")
+        else:
+            n, regime = len(state.index), int(state.regime.sum())
+            self.lbl_exclusions.setText(
+                f"Excluded rows: {regime:,} ({100 * regime / max(n, 1):.1f}%)"
+            )
         self._update_title()
 
     @Slot(bool)
-
     def _on_busy_changed(self, busy: bool) -> None:
         # Project-changing actions are disabled while a background task runs.
         for act in (self.act_new, self.act_open, self.act_save, self.act_save_as, self.act_import):
@@ -294,7 +303,6 @@ class MainWindow(QMainWindow):
         return answer == QMessageBox.StandardButton.Discard
 
     @Slot()
-
     def new_project(self) -> None:
         if not self.maybe_save():
             return
@@ -443,8 +451,45 @@ class MainWindow(QMainWindow):
             8000,
         )
 
-    @Slot(str)
+    # ------------------------------------------------------------------ anomaly detection
 
+    @Slot()
+    def _data_changed_detection(self) -> None:
+        if self.session.project.detectors and self.session.data.sources:
+            self.run_detection()
+
+    @Slot()
+    def run_detection(self) -> None:
+        """Run the project's detectors in the background on the current data."""
+        session = self.session
+        frame, mask, target = session.frames()
+        version = session.data_version
+        detectors = list(session.project.detectors)
+        if frame.empty or not detectors:
+            session.set_detector_results({}, version)
+            return
+        series = {c: frame[c] for c in frame.columns}
+        if target is not None:
+            series[str(target.name)] = target
+        text_masks = {c: mask[c] for c in mask.columns}
+        metas = {v.name: v for v in session.project.variables}
+
+        def done(results) -> None:  # noqa: ANN001
+            if session.project.detectors == detectors:  # ignore results for edited detectors
+                session.set_detector_results(results, version)
+
+        self.tasks.submit(
+            "Detecting anomalies",
+            run_detectors,
+            detectors,
+            series,
+            text_masks,
+            metas,
+            on_result=done,
+            on_error=lambda msg, details: self.show_error("Anomaly detection failed", msg, details),
+        )
+
+    @Slot(str)
     def _remove_source(self, source_id: str) -> None:
         answer = QMessageBox.question(
             self,
@@ -468,7 +513,6 @@ class MainWindow(QMainWindow):
         return True
 
     @Slot()
-
     def _open_dialog(self) -> None:
         if not self.maybe_save():
             return
@@ -479,14 +523,12 @@ class MainWindow(QMainWindow):
             self.open_project_file(path)
 
     @Slot()
-
     def _save(self) -> bool:
         if self.session.path is None:
             return self._save_as_dialog()
         return self.save_project_to(self.session.path)
 
     @Slot()
-
     def _save_as_dialog(self) -> bool:
         start = str(
             Path(self.settings.last_directory or Path.home())
@@ -501,7 +543,6 @@ class MainWindow(QMainWindow):
         save_settings(self.settings)
 
     @Slot()
-
     def _populate_recent(self) -> None:
         self.recent_menu.clear()
         if not self.settings.recent_projects:
@@ -531,7 +572,6 @@ class MainWindow(QMainWindow):
         )
 
     @Slot()
-
     def _generate_example_dialog(self) -> None:
         default = (
             Path(self.settings.last_directory or Path.home()) / "InferentialModelStudio Example"
@@ -555,7 +595,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ tools / help
 
     @Slot()
-
     def _settings_dialog(self) -> None:
         dialog = SettingsDialog(self.settings, self)
         if dialog.exec():
@@ -568,19 +607,16 @@ class MainWindow(QMainWindow):
             save_settings(self.settings)
 
     @Slot()
-
     def _project_dialog(self) -> None:
         dialog = ProjectSettingsDialog(self.session.project, self)
         if dialog.exec() and dialog.apply_to(self.session.project):
             self.session.mark_dirty()
 
     @Slot()
-
     def _open_log_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir())))
 
     @Slot()
-
     def _about(self) -> None:
         QMessageBox.about(
             self,

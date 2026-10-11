@@ -3,6 +3,33 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## v0.2.0 — Milestone 2: cleaning and exclusions (2026-10-11)
+
+### Added
+- Cleaning & Exclusions page with Raw / Flagged / Cleaned views over synchronized trends.
+- Manual exclusions: draggable range selection synchronized across charts, reason, scope
+  (all variables or selected ones), note, author; editable to the second; enable/disable.
+- Visual rule builder: whitelisted operators (`<`, `<=`, `>`, `>=`, `==`, `!=`, between,
+  outside, is missing, is invalid), AND/OR groups, minimum continuous duration with gap
+  handling, exclude rows / selected variables / flag only, live match count. No `eval`.
+- Anomaly detectors: z-score, robust MAD z-score, IQR (optional fitting period), Hampel,
+  rate of change, flatline, engineering limits, status text; plain-language help;
+  conservative "Add recommended" set; background execution.
+- Flag review: accept / reject / reset per event, opt-in auto-exclude, events inside already
+  excluded periods reported separately; decisions persisted.
+- Unified exclusion masks with per-reason categories, target-sample masks, summary tables.
+- Undo/redo for every cleaning edit (Edit menu, Ctrl+Z / Ctrl+Y).
+- Efficient exclusion shading (one item per chart regardless of interval count).
+
+### Changed
+- Project schema 3 (automatic upgrade): rules, detectors, flag decisions.
+- Removing a data source also removes rules, detector variables and decisions that used it.
+
+### Fixed
+- Time arithmetic is done in nanoseconds regardless of index resolution (pandas 3 may use µs).
+- Charts keep their zoom when exclusions change.
+- Sidebar readability on Windows dark mode (contributed in 8e1e84b).
+
 ## v0.1.0 — Milestone 1: import and raw exploration (2026-10-11)
 
 ### Added

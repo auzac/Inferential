@@ -5,11 +5,10 @@ inferential models (soft sensors), starting with distillation columns.
 
 Python · PySide6 (Qt 6) · PyQtGraph · pandas · scikit-learn. No cloud services, no telemetry.
 
-> **Status: v0.1.0 — Milestone 1 (import and raw exploration).** CSV/Excel import with a
-> timestamp wizard, validation reports, background data loading and the initial EDA page
-> (trends, statistics, correlations, coverage) work. Cleaning and exclusions arrive in
-> Milestone 2; later stages show which milestone delivers them. See the
-> [user guide](docs/user-guide.md).
+> **Status: v0.2.0 — Milestone 2 (cleaning and exclusions).** Import with a timestamp
+> wizard, raw EDA, and cleaning: manual exclusions on the charts, a visual rule builder,
+> anomaly detectors with accept/reject review, and undo/redo. Variable selection and signal
+> processing arrive in Milestone 3. See the [user guide](docs/user-guide.md).
 
 ## Quick start (Windows, PowerShell)
 
@@ -66,6 +65,9 @@ src/inferential_studio/
     importers.py          CSV/Excel reading, validation report, project data loading
     dataset.py            raw and normalized data layers
     statistics.py         descriptive statistics, correlations, coverage, X–Y screening
+    rules.py              rule evaluation (typed conditions, AND/OR, minimum duration)
+    quality.py            anomaly detectors producing reviewable flag events
+    exclusions.py         unified exclusion masks with per-reason categories
     synthetic.py          synthetic distillation dataset with ground truth
     tasks.py              progress/cancellation primitives for long-running functions
   infrastructure/         logging, per-user settings, paths, background TaskManager (Qt)

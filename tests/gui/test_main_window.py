@@ -22,6 +22,8 @@ pytestmark = pytest.mark.gui
 def window(qtbot, monkeypatch):
     w = MainWindow(AppSettings(display_timezone="Asia/Singapore"))
     w.errors = []
+    # pytest-qt closes widgets before fixture teardown: never block on "save changes?" there.
+    monkeypatch.setattr(w, "maybe_save", lambda: True)
     monkeypatch.setattr(
         w, "show_error", lambda title, msg, details="": w.errors.append((title, msg))
     )
@@ -115,6 +117,7 @@ def test_save_as_elsewhere_keeps_sources_reachable(qtbot, window, example_copy, 
     qtbot.addWidget(reopened)
     reopened.errors = []
     reopened.show_error = lambda title, msg, details="": reopened.errors.append(msg)
+    reopened.maybe_save = lambda: True
     open_and_wait(qtbot, reopened, out_dir / "saved.imsproj")
     assert reopened.errors == []
     assert set(reopened.session.data.sources) == {"process", "lab"}
