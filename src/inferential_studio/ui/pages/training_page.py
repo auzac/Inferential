@@ -20,9 +20,11 @@ from PySide6.QtWidgets import (
 from inferential_studio.core.models import ModelResult, PcrDetails, PlsDetails
 from inferential_studio.core.schemas import ModelKind
 from inferential_studio.core.splits import SPLITS, TEST
+from inferential_studio.ui.messages import Level
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
+from inferential_studio.ui.theme import mark_primary
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.plots import (
     SPLIT_COLOURS,
@@ -71,17 +73,11 @@ class TrainingPage(StagePage):
         super().__init__(stage, parent)
         self._session = session
 
-        self.banner = QLabel()
-        self.banner.setWordWrap(True)
-        self.banner.setStyleSheet(
-            "background:#FFF4E5; color:#7A4100; padding:6px; border:1px solid #F0C080;"
-        )
-        self.banner.setVisible(False)
         self.train_button = QPushButton("Train models")
         self.train_button.clicked.connect(self.train_requested.emit)
+        mark_primary(self.train_button)
         self.model_combo = QComboBox()
         self.model_combo.currentIndexChanged.connect(self._show_model)
-        self.summary = note_label()
         top = QHBoxLayout()
         top.addWidget(QLabel("Model"))
         top.addWidget(self.model_combo, 1)
@@ -160,9 +156,7 @@ class TrainingPage(StagePage):
         self._var_tab = tab
         self.tabs.addTab(tab, "Explained variance")
 
-        self.body.addWidget(self.banner)
         self.body.addLayout(top)
-        self.body.addWidget(self.summary)
         self.body.addWidget(self.tabs, 1)
 
         session.training_changed.connect(self.refresh)
@@ -186,16 +180,6 @@ class TrainingPage(StagePage):
     def refresh(self) -> None:
         run = self._session.training
         self._update_button()
-        lines = [self._session.reproduction] if self._session.reproduction else []
-        if self._session.training_stale:
-            lines.append(
-                "Settings or data changed since these models were trained. The results below are "
-                "out of date — train again."
-            )
-        if run is not None:
-            lines.extend(f"✖ {e}" for e in run.errors)
-        self.banner.setVisible(bool(lines))
-        self.banner.setText("<br>".join(lines))
         previous = self.model_combo.currentText()
         self.model_combo.blockSignals(True)
         self.model_combo.clear()
@@ -205,19 +189,6 @@ class TrainingPage(StagePage):
         index = self.model_combo.findText(previous)
         self.model_combo.setCurrentIndex(max(index, 0))
         self.model_combo.blockSignals(False)
-        if run is None:
-            self.summary.setText(
-                "No models trained yet. Configure them on Model Setup and press Train."
-            )
-        else:
-            counts = run.split.counts()
-            self.summary.setText(
-                f"Trained on {counts['train']} samples ({run.n_effective:.0f} effectively independent "
-                f"after autocorrelation); {len(run.features)} predictors; scaling: "
-                f"{run.config.scaling.value}. Hyperparameters were tuned with "
-                f"{run.config.split.cv_folds}-fold {run.config.split.cv_kind.value} CV inside the "
-                "training period."
-            )
         self._show_model()
 
     @Slot()
@@ -226,12 +197,16 @@ class TrainingPage(StagePage):
         for plot in (self.coef_plot, self.cv_plot, self.load_plot, self.score_plot, self.var_plot):
             plot.clear()
         self.coef_table.set_frame(pd.DataFrame())
+        msgs = self._session.messages
+        msgs.clear("training.model")
         if m is None:
             self.cv_note.setText("")
             return
         if not m.ok:
             self.cv_note.setText(m.error)
-            self.summary.setText(f"{m.spec.label} could not be trained: {m.error}")
+            msgs.set(
+                "training.model", Level.WARNING, f"{m.spec.label} could not be trained: {m.error}"
+            )
             return
         self._update_coefficients(m)
         self._update_cv(m)
@@ -241,9 +216,8 @@ class TrainingPage(StagePage):
         if latent:
             self._fill_latent_controls(m)
         if m.warnings:
-            self.summary.setText(
-                self.summary.text().split("<br>")[0] + "<br>⚠ " + "<br>⚠ ".join(m.warnings)
-            )
+            msgs.set("training.model", Level.WARNING, f"{m.name}: " + " ".join(m.warnings),
+                     also=("validation",))  # fmt: skip
 
     def _units(self) -> dict[str, str | None]:
         return {v.name: v.units for v in self._session.project.variables}

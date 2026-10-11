@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
@@ -54,9 +53,11 @@ from inferential_studio.core.schemas import ReportInfo
 from inferential_studio.infrastructure.settings import AppSettings
 from inferential_studio.infrastructure.workers import TaskManager
 from inferential_studio.ui.commands import edit_lists
+from inferential_studio.ui.messages import Level
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
+from inferential_studio.ui.theme import mark_primary
 from inferential_studio.ui.widgets.plots import legend, note_label, plot_widget, scatter
 from inferential_studio.ui.widgets.time_axis import to_epoch_seconds
 
@@ -86,12 +87,6 @@ class ExportPage(StagePage):
         self._loaded_path: Path | None = None
         self._prediction: Prediction | None = None
         self.last_written: Path | None = None  # for tests and the status bar
-
-        self.banner = QLabel()
-        self.banner.setWordWrap(True)
-        self.banner.setStyleSheet(
-            "background:#FFF4E5; color:#7A4100; padding:6px; border:1px solid #F0C080;"
-        )
 
         # -- the trained model -----------------------------------------------------------
         self.model_combo = QComboBox()
@@ -124,6 +119,7 @@ class ExportPage(StagePage):
 
         self.btn_report = QPushButton("Save model card (HTML)…")
         self.btn_report.clicked.connect(lambda: self.save_report())
+        mark_primary(self.btn_report)
         self.btn_predictions = QPushButton("Export predictions…")
         self.btn_predictions.clicked.connect(lambda: self.export_predictions())
         self.btn_features = QPushButton("Export feature matrix…")
@@ -142,8 +138,6 @@ class ExportPage(StagePage):
             self.btn_equation,
         ):
             bl.addWidget(b)
-        self.status = note_label()
-        bl.addWidget(self.status)
         bl.addWidget(
             note_label(
                 "The model file is plain JSON (no executable code): feature definitions, "
@@ -220,7 +214,6 @@ class ExportPage(StagePage):
         split.addWidget(apply_box)
         split.setSizes([460, 640])
         split.setChildrenCollapsible(False)
-        self.body.addWidget(self.banner)
         self.body.addWidget(split, 1)
 
         session.training_changed.connect(self.refresh)
@@ -240,14 +233,6 @@ class ExportPage(StagePage):
     def refresh(self) -> None:
         s = self._session
         run = s.training
-        if run is None:
-            msg = "Train models (Model Setup) before exporting a model card, predictions or a model file."
-        elif s.training_stale:
-            msg = "Settings or data changed since training. Train again before exporting, so the exports match the project."
-        else:
-            msg = ""
-        self.banner.setVisible(bool(msg))
-        self.banner.setText(msg)
         ok = self._run_ok()
         for b in (
             self.btn_report,
@@ -338,7 +323,7 @@ class ExportPage(StagePage):
     def _done(self, path: Path) -> None:
         self.last_written = path
         self._settings.last_directory = str(path.parent)
-        self.status.setText(f"Saved {path}")
+        self._session.messages.info(f"Saved {path}", "export")
 
     def _fail(self, title: str, message: str) -> None:
         window = self.window()
@@ -467,8 +452,13 @@ class ExportPage(StagePage):
             f"{d.get('model_version', '')}, created {str(d.get('created_at', ''))[:16]} UTC; "
             f"predictors: {', '.join(art.coefficients)}."
         )
+        self._session.messages.set(
+            "export.model", Level.ERROR,
+            f"{self._loaded_path.name} cannot be applied to this project: " + " ".join(problems)
+            if problems else "",
+        )  # fmt: skip
         if problems:
-            text += "<br><span style='color:#B00020'>✖ " + " ".join(problems) + "</span>"
+            text += "<br>Not compatible with this project — see Messages."
         elif frame.empty:
             text += "<br>Import process data to apply it."
         self.loaded_note.setText(text)
@@ -553,7 +543,11 @@ class ExportPage(StagePage):
                         f"bias (predicted − actual) {err.mean():.4g}."
                     )
         self.apply_plot.setLabel("left", self._loaded.target if self._loaded else "")
-        self.apply_note.setText(" ".join(lines))
+        self.apply_note.setText(" ".join(lines[:1] + lines[-1:]) if len(lines) > 1 else lines[0])
+        level = Level.WARNING if pred.warnings else Level.INFO
+        self._session.messages.post(
+            level, f"Applied {self._loaded.name}: " + " ".join(lines), "export"
+        )
 
     def export_applied(self, path: Path | None = None) -> Path | None:
         if self._prediction is None:

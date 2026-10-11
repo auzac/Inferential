@@ -76,13 +76,13 @@ def test_processing_page_batch_edit_and_causality(loaded, qtbot):
     qtbot.waitUntil(lambda: idle(loaded), timeout=30000)
     specs = loaded.session.project.features
     assert all(s.window_s == 900 and s.aggregation is Aggregation.MEDIAN for s in specs)
-    assert not page.causal_banner.isVisible()
+    assert loaded.session.messages.condition("processing.noncausal") is None
     page.table.selectRow(1)
     page.placement.setCurrentIndex(page.placement.findData(WindowPlacement.CENTERED.value))
     page.deadtime.setValue(5)  # centred 15-min window ending 2.5 min after the sample time
     assert page.apply_form(all_rows=False)
     qtbot.waitUntil(lambda: idle(loaded), timeout=30000)
-    assert page.causal_banner.isVisible()
+    assert "Non-causal" in loaded.session.messages.condition("processing.noncausal").text
     assert loaded.session.features.non_causal == [specs[1].variable]
     loaded.undo_stack.undo()
     qtbot.waitUntil(lambda: idle(loaded), timeout=30000)
@@ -91,7 +91,7 @@ def test_processing_page_batch_edit_and_causality(loaded, qtbot):
     page.filter_kind.setCurrentIndex(1)  # rolling mean without a length → invalid
     page.filter_len.setValue(0)
     assert not page.apply_form(all_rows=False)
-    assert "positive window" in page.editor_note.text()
+    assert "positive window" in loaded.session.messages.events[0].text
 
 
 def test_lag_scan_runs_on_training_period(loaded, qtbot):

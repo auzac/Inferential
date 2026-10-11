@@ -86,8 +86,9 @@ Listed in workflow order.
 | `session.py` | The open project + loaded data + derived state (cleaning masks, aligned features, training run); background recomputation and signals that pages listen to. |
 | `stages.py` | The nine workflow stages (titles, goals) shown in the sidebar. |
 | `commands.py` | Undo/redo: edits replace whole project lists/configs. |
+| `messages.py` | `MessageCenter` (on `session.messages`): every status line, warning and error. Pages call `messages.set(key, level, text)` for a state and `messages.info/warning/error(...)` for an event — never a label in the page. |
 | `help.py` | Per-stage help text (Help panel) and the in-app document viewer (F1). |
-| `theme.py` | Colours and stylesheet. |
+| `theme.py` | Colour tokens, stylesheet, `mark_primary()` for a page's main button. **Change the look here.** |
 | `import_wizard.py` | The five-step import wizard. |
 | `cleaning_dialogs.py` | Dialogs for exclusions, rules and detectors. |
 | `project_dialog.py`, `settings_dialog.py` | Project settings and application settings dialogs. |
@@ -107,7 +108,8 @@ Listed in workflow order.
 | 8 Validation | `validation_page.py` |
 | 9 Export & Report | `export_page.py` |
 
-`ui/widgets/` — reusable pieces: `trend_view.py` (synchronized trend charts), `cursor_readout.py`
+`ui/widgets/` — reusable pieces: `message_panel.py` (fixed message log at the bottom),
+`trend_view.py` (synchronized trend charts), `cursor_readout.py`
 (values at cursor), `overlays.py` (exclusion shading), `time_axis.py` (timezone-aware axis),
 `plots.py` (chart helpers for modelling pages), `heatmap.py`, `data_table.py` (pandas table view),
 `variable_list.py`, `timezone_combo.py`, `task_progress.py` (status-bar progress/cancel).
@@ -148,5 +150,7 @@ Run everything: `pytest` (about 3 minutes). Lint: `ruff check src tests` and `ru
 | Project or model file format | `core/persistence.py`, `core/artifacts.py`, `docs/file-formats.md` |
 | Something is slow in the GUI | the page's update method; long work should go through `TaskManager` |
 | Help text on a page | `ui/help.py` |
+| A warning or status message | `session.messages` (`ui/messages.py`), shown by `ui/widgets/message_panel.py` |
+| Colours, fonts, spacing | `ui/theme.py` (`TOKENS`) |
 | Logs and settings on a PC | `%LOCALAPPDATA%\InferentialModelStudio\` (Tools → Open Log Folder) |
 | Regenerate the example | `inferential-studio-synth --out examples/synthetic_distillation` |

@@ -3,6 +3,27 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## v0.5.1 — Interface refresh and message panel (2026-10-12)
+
+### Added
+- **Messages panel**: a fixed-height log at the bottom of the window collects every status
+  line, warning and error. Active conditions are pinned on top until their cause is fixed;
+  events (saved, imported, failed) are kept with a time stamp. Filter by current stage or all
+  stages, warning/error badges, double-click for details, copy, clear. Pages no longer insert
+  banners or status lines, so their charts and tables never move.
+- Errors that used to open a dialog (load, save, training failures …) are reported in the panel
+  (questions that need a decision, and the import "Change settings…" dialog, stay dialogs).
+
+### Changed
+- New light, high-contrast industrial theme: dark slate navigation rail and status bar, white
+  surfaces on a cool grey work area, one steel-blue accent for selection and the main action of
+  each page, flat tabs, consistent inputs, tables and scroll bars. Colours live in one token set
+  (`ui/theme.py`).
+- Page header with stage number, title and goal; navigation rail with application title.
+- Train, Apply, Exclude selection, Import process data and Save model card are styled as the
+  primary action of their page; the Train button on Model Setup no longer scrolls away.
+- Validation: per-period metrics always show all three rows; shorter captions.
+
 ## v0.5.0 — Milestone 5: persistence, reporting and release preparation (2026-10-11)
 
 Release candidate for v1.0.0 (pending the installer test on a clean Windows PC).

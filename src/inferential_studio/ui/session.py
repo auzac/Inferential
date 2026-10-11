@@ -36,6 +36,7 @@ from inferential_studio.core.schemas import (
     VariableMeta,
     VariableRole,
 )
+from inferential_studio.ui.messages import Level, MessageCenter
 
 if TYPE_CHECKING:
     from inferential_studio.infrastructure.workers import TaskManager
@@ -75,6 +76,7 @@ class ProjectSession(QObject):
     inputs_changed = Signal()  # predictors, feature settings or alignment options edited
     modelling_changed = Signal()  # model / split configuration edited
     features_changed = Signal()  # aligned feature matrix recomputed (or failed: see features_error)
+    FEATURE_STAGES = ("variables", "processing", "model_setup")
     training_changed = Signal()  # a training run finished or was invalidated
 
     # Project attributes that undoable edits replace wholesale.
@@ -85,6 +87,7 @@ class ProjectSession(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._project = Project()
+        self.messages = MessageCenter(self)  # every info / warning / error shown in the footer
         self._data = ProjectData()
         self._path: Path | None = None
         self._dirty = False
@@ -108,6 +111,8 @@ class ProjectSession(QObject):
         self.saved_results: dict | None = None  # training summary stored in the project file
         self.reproduction: str | None = None  # outcome of re-training a reopened project
         self.cleaning_changed.connect(self.recompute_features)
+        self.features_changed.connect(self._report_features)
+        self.training_changed.connect(self._report_training)
 
     # ------------------------------------------------------------------ state
 
@@ -413,6 +418,74 @@ class ProjectSession(QObject):
         self.features, self.features_error = fm, error
         self.features_changed.emit()
 
+    def _report_features(self) -> None:
+        """One message about the aligned feature matrix, shown on stages 4–6."""
+        fm = self.features
+        if fm is None:
+            level = Level.WARNING if self.features_error else Level.INFO
+            text = self.features_error or "Aligning features…"
+        else:
+            s = fm.summary()
+            level = Level.INFO if s["eligible"] else Level.WARNING
+            text = (
+                f"{s['eligible']:,} of {s['lab_samples']:,} lab samples are model-eligible "
+                f"(target missing {s['target_missing']}, target excluded {s['target_excluded']}, "
+                f"failed feature checks {s['feature_failures']}"
+                + (
+                    f", flagged target values awaiting review {s['target_pending_review']}"
+                    if s["target_pending_review"]
+                    else ""
+                )  # fmt: skip
+                + ")."
+            )
+        self.messages.set("variables.features", level, text, also=self.FEATURE_STAGES[1:])
+        non_causal = fm.non_causal if fm is not None else []
+        self.messages.set(
+            "processing.noncausal",
+            Level.WARNING,
+            "Non-causal settings read process data recorded after the lab sample time: "
+            + ", ".join(non_causal)
+            + ". Use them for retrospective analysis only."
+            if non_causal
+            else "",
+            also=("variables", "model_setup", "training", "validation"),
+        )
+
+    def _report_training(self) -> None:
+        """Messages about the training run, shown on stages 7–9."""
+        m, run = self.messages, self.training
+        later = ("validation", "export")
+        if run is None:
+            m.set("training.state", Level.INFO,
+                  "No models trained yet. Configure them on Model Setup and press Train.", also=later)  # fmt: skip
+        elif self.training_stale:
+            m.set("training.state", Level.WARNING,
+                  "Settings or data changed since the models were trained: the results shown are out "
+                  "of date. Train again (exports are disabled until then).", also=later)  # fmt: skip
+        else:
+            counts = run.split.counts()
+            m.set(
+                "training.state", Level.INFO,
+                f"Trained on {counts['train']} samples ({run.n_effective:.0f} effectively independent); "
+                f"{len(run.features)} predictors; {run.config.scaling.value} scaling; "
+                f"{run.config.split.cv_folds}-fold {run.config.split.cv_kind.value} CV in the training period.",
+                also=later,
+            )  # fmt: skip
+        errors = run.errors if run is not None else []
+        m.set("training.errors", Level.ERROR, " ".join(errors), also=later)
+        warnings = [p.message for p in run.problems if p.severity != "error"] if run else []
+        m.set("training.warnings", Level.WARNING, " ".join(warnings), also=later)
+        failed = [f"{x.spec.label}: {x.error}" for x in (run.models if run else []) if not x.ok]
+        m.set("training.failed", Level.WARNING, "Not trained — " + "; ".join(failed) if failed else "",
+              also=later)  # fmt: skip
+        repro = self.reproduction
+        m.set("training.reproduction", Level.INFO if repro and repro.startswith("✓") else Level.WARNING,
+              repro or "", also=later)  # fmt: skip
+        m.set("validation.revealed", Level.INFO,
+              "Final test results are shown. Model or setting changes made after looking at them make "
+              "the test exploratory." if run is not None and self.test_revealed else "",
+              also=("export",))  # fmt: skip
+
     # ------------------------------------------------------------------ training
 
     def set_training(self, run: TrainingRun, *, reproduce: bool = False) -> None:
@@ -534,6 +607,7 @@ class ProjectSession(QObject):
         self.saved_results = None
         self.reproduction = None
         self.training = None
+        self.training_changed.emit()
         self.training_stale = False
         self.test_revealed = False
         self._path = path

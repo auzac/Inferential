@@ -51,9 +51,11 @@ from inferential_studio.core.schemas import (
 from inferential_studio.core.splits import TRAIN, SplitError, chronological_split
 from inferential_studio.infrastructure.workers import TaskManager
 from inferential_studio.ui.commands import edit_lists
+from inferential_studio.ui.messages import Level
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
+from inferential_studio.ui.theme import mark_primary
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.plots import legend, note_label, plot_widget, scatter
 from inferential_studio.ui.widgets.time_axis import format_time, to_epoch_seconds
@@ -194,9 +196,9 @@ class ProcessingPage(StagePage):
         form.addRow("Max gap", self.max_gap)
         self.apply_selected = QPushButton("Apply to selected")
         self.apply_selected.clicked.connect(lambda: self.apply_form(all_rows=False))
+        mark_primary(self.apply_selected)
         self.apply_all = QPushButton("Apply to all")
         self.apply_all.clicked.connect(lambda: self.apply_form(all_rows=True))
-        self.editor_note = note_label()
         self.regime = QCheckBox("Reject windows that overlap operating-regime exclusions")
         self.regime.setToolTip(
             "Shutdowns, start-ups and other exclusions of all signals make a sample ineligible "
@@ -204,13 +206,13 @@ class ProcessingPage(StagePage):
         )
         self.regime.toggled.connect(self._regime_toggled)
         editor = QGroupBox("Settings for the selected predictors")
+        self.editor_box = editor
         el = QVBoxLayout(editor)
         el.addLayout(form)
         brow = QHBoxLayout()
         brow.addWidget(self.apply_selected)
         brow.addWidget(self.apply_all)
         el.addLayout(brow)
-        el.addWidget(self.editor_note)
         el.addWidget(self.regime)
         el.addStretch(1)
 
@@ -262,7 +264,8 @@ class ProcessingPage(StagePage):
         self.lag_use = QPushButton("Use best delay as deadtime")
         self.lag_use.setEnabled(False)
         self.lag_use.clicked.connect(self._use_best_delay)
-        self.lag_note = note_label(LagScan.note)
+        self.lag_note = note_label("Run a scan to see the correlation for each tested delay.")
+        self.lag_note.setToolTip(LagScan.note)
         lag = QWidget()
         ll = QVBoxLayout(lag)
         lrow = QHBoxLayout()
@@ -279,10 +282,8 @@ class ProcessingPage(StagePage):
         self.tabs.addTab(lag, "Lag sensitivity")
 
         self.coverage_table = DataTableView()
-        self.coverage_note = note_label()
         cov = QWidget()
         cl = QVBoxLayout(cov)
-        cl.addWidget(self.coverage_note)
         cl.addWidget(self.coverage_table, 1)
         cl.addWidget(
             note_label(
@@ -298,13 +299,6 @@ class ProcessingPage(StagePage):
         self.tabs.addTab(self.samples_table, "Feature matrix")
         self.tabs.currentChanged.connect(lambda _i: self._fill_samples())
 
-        self.status = note_label()
-        self.causal_banner = QLabel()
-        self.causal_banner.setWordWrap(True)
-        self.causal_banner.setStyleSheet(
-            "background:#FFF4E5; color:#7A4100; padding:6px; border:1px solid #F0C080;"
-        )
-        self.causal_banner.setVisible(False)
         top = QSplitter(Qt.Orientation.Horizontal)
         top.addWidget(self.table)
         top.addWidget(editor)
@@ -312,9 +306,7 @@ class ProcessingPage(StagePage):
         main = QSplitter(Qt.Orientation.Vertical)
         main.addWidget(top)
         main.addWidget(self.tabs)
-        main.setSizes([260, 460])
-        self.body.addWidget(self.status)
-        self.body.addWidget(self.causal_banner)
+        main.setSizes([210, 520])
         self.body.addWidget(main, 1)
 
         self._preview_timer = QTimer(self)
@@ -402,15 +394,10 @@ class ProcessingPage(StagePage):
             self.table.selectRow(0)
         self._update_counts()
         self._load_form()
-        non_causal = [s.variable for s in specs if not s.is_causal]
-        self.causal_banner.setVisible(bool(non_causal))
-        self.causal_banner.setText(
-            "⚠ Non-causal settings (centred window or negative total delay) read process data "
-            f"recorded after the lab sample time: {', '.join(non_causal)}. Use them only for "
-            "retrospective analysis; an online inferential cannot see the future."
-        )
-        if not specs:
-            self.status.setText("Choose a target and predictors on the Variable Selection page.")
+        self._session.messages.set(
+            "processing.inputs", Level.INFO,
+            "" if specs else "Choose a target and predictors on the Variable Selection page.",
+        )  # fmt: skip
         self._preview_timer.start()
 
     def _update_counts(self) -> None:
@@ -454,7 +441,7 @@ class ProcessingPage(StagePage):
         self.coverage.setValue(spec.min_coverage * 100)
         self.max_gap.setValue((spec.max_gap_s or 0) / 60)
         n = len(self.selected_variables())
-        self.editor_note.setText(f"Editing {n} predictor(s)." if n > 1 else f"Editing {name}.")
+        self.editor_box.setTitle(f"Settings — {n} predictors" if n > 1 else f"Settings — {name}")
 
     def form_spec(self, variable: str) -> FeatureSpec:
         kind = FilterKind(self.filter_kind.currentData())
@@ -486,7 +473,7 @@ class ProcessingPage(StagePage):
         try:
             new = [self.form_spec(s.variable) if s.variable in targets else s for s in specs]
         except SchemaError as exc:
-            self.editor_note.setText(f"<span style='color:#B00020'>{exc}</span>")
+            self._session.messages.error(f"Feature settings not applied: {exc}", "processing")
             return False
         edit_lists(self._undo, self._session, "Edit feature settings", features=new)
         return True
@@ -503,24 +490,10 @@ class ProcessingPage(StagePage):
     def _on_features(self) -> None:
         fm = self._session.features
         if fm is None:
-            self.status.setText(self._session.features_error or "Aligning features…")
             self.coverage_table.set_frame(pd.DataFrame())
             self.samples_table.set_frame(pd.DataFrame())
             self._preview_timer.start()
             return
-        s = fm.summary()
-        self.status.setText(
-            f"<b>{s['eligible']:,} of {s['lab_samples']:,} lab samples are model-eligible.</b> "
-            f"Target missing: {s['target_missing']}, target excluded: {s['target_excluded']}, "
-            f"failed feature checks: {s['feature_failures']}"
-            + (
-                f", flagged target values awaiting review: {s['target_pending_review']}"
-                if s["target_pending_review"]
-                else ""
-            )  # fmt: skip
-            + ". One row per lab sample; Y is never filled in between samples."
-        )
-        self.coverage_note.setText(" ".join(fm.notes))
         self.coverage_table.set_frame(fm.coverage_report(), COVERAGE_HEADERS)
         self._fill_samples()
         self.sample_spin.blockSignals(True)
@@ -674,7 +647,7 @@ class ProcessingPage(StagePage):
                 self._session.project, self._session.data, self._session.cleaning
             )
         except ValueError as exc:
-            self.lag_note.setText(str(exc))
+            self._session.messages.error(f"Lag scan: {exc}", "processing")
             return
         spec = next(s for s in self.specs() if s.variable == name)
         state = self._session.cleaning
@@ -692,7 +665,10 @@ class ProcessingPage(StagePage):
             excluded,
             cutoff,
             on_result=self._lag_done,
-            on_error=lambda msg, _d: (self.lag_note.setText(msg), self.lag_run.setEnabled(True)),
+            on_error=lambda msg, _d: (
+                self._session.messages.error(f"Lag scan failed: {msg}", "processing"),
+                self.lag_run.setEnabled(True),
+            ),
             on_cancelled=lambda: self.lag_run.setEnabled(True),
         )
 
@@ -719,7 +695,8 @@ class ProcessingPage(StagePage):
             text = f"Largest |r| = {abs(scan.pearson[i]):.3f} at {best / 60:g} min ({cutoff}; n = {scan.n_pairs[i]})."
         else:
             text = f"Not enough samples to correlate ({cutoff})."
-        self.lag_note.setText(f"{text} Dashed line: current setting. {LagScan.note}")
+        self.lag_note.setText(f"{text} Dashed line: current setting.")
+        self._session.messages.info(f"Lag scan for {scan.variable}: {text}", "processing")
         self.lag_use.setEnabled(best is not None and best >= 0)
 
     def _use_best_delay(self) -> None:

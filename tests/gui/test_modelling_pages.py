@@ -63,20 +63,23 @@ def test_setup_form_edits_config_with_undo(loaded, qtbot):
     page.train_pct.setValue(80)
     page.val_pct.setValue(25)
     assert not page.apply()
-    assert "leave samples for the test" in page.config_error.text()
+    assert (
+        "leave samples for the test" in loaded.session.messages.condition("model_setup.config").text
+    )
 
 
 def test_switching_to_dates_starts_from_current_boundaries(loaded, qtbot):
     page = loaded.pages["model_setup"]
     page._update_preview()
-    before = page.split_note.text()
+    split_text = lambda: loaded.session.messages.condition("model_setup.split").text  # noqa: E731
+    before = split_text()
     page.mode.setCurrentIndex(page.mode.findData(SplitMode.DATES.value))
     assert page.apply()
     split = loaded.session.project.modelling.split
     assert split.mode is SplitMode.DATES and split.train_end < split.validation_end
     page._update_preview()
     # Same samples per period as the share-based split (boundaries rounded to minutes).
-    assert page.split_note.text().split(";")[0] == before.split(";")[0]
+    assert split_text().split(";")[0] == before.split(";")[0]
 
 
 def test_training_and_guarded_test_reveal(loaded, qtbot):
@@ -106,7 +109,8 @@ def test_training_and_guarded_test_reveal(loaded, qtbot):
     edit_lists(loaded.undo_stack, loaded.session, "edit",
                features=[replace(specs[0], window_s=600)] + specs[1:])  # fmt: skip
     assert loaded.session.training_stale and loaded.session.training is run
-    assert not vpage.banner.isHidden() and "out of date" in vpage.banner.text()
+    state = loaded.session.messages.condition("training.state")
+    assert "out of date" in state.text and state.visible_in("validation")
     qtbot.waitUntil(lambda: idle(loaded), timeout=30000)
 
 
