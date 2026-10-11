@@ -23,7 +23,7 @@ class StagePage(QWidget):
 
         header = QFrame()
         header.setObjectName("pageHeader")
-        eyebrow = QLabel(f"STAGE {stage.number} OF {len(STAGES)}")
+        eyebrow = QLabel(f"Stage {stage.number} of {len(STAGES)}")
         eyebrow.setObjectName("pageEyebrow")
         title = QLabel(stage.title)
         title.setObjectName("pageTitle")

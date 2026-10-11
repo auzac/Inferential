@@ -133,9 +133,37 @@ class DataTableView(QTableView):
         self.verticalHeader().setDefaultSectionSize(22)
         # Size columns from the first rows only: measuring every cell of a long table is slow.
         self.horizontalHeader().setResizeContentsPrecision(200)
+        self._fit_rows: int | None = None
 
     def set_frame(self, frame: pd.DataFrame, headers: dict[str, str] | None = None) -> None:
         self.model_.set_frame(frame, headers)
         self.resizeColumnsToContents()
         for col in range(self.model_.columnCount()):
             self.setColumnWidth(col, min(self.columnWidth(col), 260))
+        self._apply_fit()
+
+    def fit_to_rows(self, max_rows: int = 8, min_rows: int = 2) -> None:
+        """Make the table exactly as tall as its rows (up to ``max_rows``; then it scrolls).
+
+        For short summary tables (model comparison, metrics): no empty band under the rows,
+        and the page below keeps the space.
+        """
+        self._fit_rows = max_rows
+        self._min_rows = min_rows
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._apply_fit()
+
+    def _apply_fit(self) -> None:
+        if self._fit_rows is None:
+            return
+        rows = max(min(self.model_.rowCount(), self._fit_rows), self._min_rows)
+        header = self.horizontalHeader().sizeHint().height()
+        height = header + rows * self.verticalHeader().defaultSectionSize() + 2 * self.frameWidth()
+        if self.horizontalScrollBar().maximum() > 0:  # columns wider than the view
+            height += self.horizontalScrollBar().sizeHint().height()
+        if height != self.height() or self.minimumHeight() != height:
+            self.setFixedHeight(height)
+
+    def resizeEvent(self, event) -> None:  # noqa: ANN001, N802 - Qt override
+        super().resizeEvent(event)
+        self._apply_fit()  # a narrower view may now need the horizontal scroll bar

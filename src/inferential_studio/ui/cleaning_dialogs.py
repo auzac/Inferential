@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -291,9 +292,10 @@ class ConditionRow(QWidget):
         self.value2 = QLineEdit()
         self.value2.setPlaceholderText("upper")
         self.value2.setMaximumWidth(110)
-        remove = QPushButton("✕")
+        remove = QToolButton()
+        remove.setText("✕")
+        remove.setObjectName("iconButton")
         remove.setToolTip("Remove this condition")
-        remove.setFixedWidth(28)
         remove.clicked.connect(lambda: on_remove(self))
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

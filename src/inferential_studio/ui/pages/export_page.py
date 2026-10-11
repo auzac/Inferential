@@ -179,8 +179,13 @@ class ExportPage(StagePage):
         self.btn_load.clicked.connect(lambda: self.load_model_file())
         self.loaded_note = note_label("Apply a saved model to the data loaded in this project.")
         self.when = QComboBox()
-        self.when.addItem("At the lab sample times (compare with the lab)", "lab")
-        self.when.addItem("At regular intervals over the loaded period", "grid")
+        self.when.addItem("At lab sample times", "lab")
+        self.when.addItem("At regular intervals", "grid")
+        self.when.setItemData(
+            0, "Predict where lab results exist and compare with them", Qt.ItemDataRole.ToolTipRole
+        )
+        self.when.setItemData(1, "Predict every N minutes over the loaded period",
+                              Qt.ItemDataRole.ToolTipRole)  # fmt: skip
         self.when.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )

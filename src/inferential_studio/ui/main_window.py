@@ -8,7 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import PySide6
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Slot
+from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -75,6 +75,7 @@ from inferential_studio.ui.widgets.task_progress import TaskProgressWidget
 log = logging.getLogger(__name__)
 PROJECT_FILTER = f"Inferential Model Studio project (*{PROJECT_EXTENSION})"
 COMPACT_SCREEN_HEIGHT = 900  # px available; below this the message panel shows one row less
+WIDE_SCREEN_WIDTH = 1600  # px available; narrower screens start with the help panel closed
 
 
 class MainWindow(QMainWindow):
@@ -86,20 +87,20 @@ class MainWindow(QMainWindow):
         self.session.attach_tasks(self.tasks)  # exclusion masks recompute in the background
         self.undo_stack = QUndoStack(self)
         self.setMinimumSize(QSize(960, 640))
-        self.resize(1280, 800)
         self._build_actions()
         self._build_menus_and_toolbar()
         self._build_central()
         self._build_properties_panel()
         self._build_message_panel()
         self._build_status_bar()
+        self._restore_window()
         self.session.changed.connect(self._refresh_status)
         self.session.data_changed.connect(self._refresh_status)
         self.session.cleaning_changed.connect(self._refresh_status)
         self.session.detectors_changed.connect(self.run_detection)
         self.session.data_changed.connect(self._data_changed_detection)
         self._load_generation = 0
-        self.session.dirty_changed.connect(self.setWindowModified)
+        self.session.dirty_changed.connect(lambda _d: self._update_title())
         self.session.path_changed.connect(lambda _p: self._update_title())
         self.tasks.busy_changed.connect(self._on_busy_changed)
         self._reproduce_pending = False  # reopened project with saved results: re-train once
@@ -225,6 +226,7 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(corner)
         layout.setContentsMargins(0, 0, 4, 0)
         layout.setSpacing(0)
+        self._corner_layout = layout
         groups = [
             [self.act_new, self.act_open, self.act_save, self.act_save_as],
             [self.act_import, self.act_export],
@@ -308,8 +310,10 @@ class MainWindow(QMainWindow):
         rail_layout.setSpacing(0)
         rail_title = QLabel(APP_NAME)
         rail_title.setObjectName("railTitle")
-        rail_sub = QLabel("WORKFLOW")
+        rail_sub = QLabel()  # the open project's name (see _update_title)
         rail_sub.setObjectName("railSubtitle")
+        rail_sub.setWordWrap(True)
+        self.rail_project = rail_sub
         rail_layout.addWidget(rail_title)
         rail_layout.addWidget(rail_sub)
         rail_layout.addWidget(self.sidebar, 1)
@@ -335,7 +339,18 @@ class MainWindow(QMainWindow):
         self.properties_dock = dock
         panel = dock.toggleViewAction()
         panel.setText("Help &Panel")
+        panel.setShortcut(QKeySequence("Shift+F1"))
+        panel.setToolTip("Show or hide the stage help on the right (Shift+F1)")
         self.help_menu.insertAction(self.act_about, panel)
+        self.act_help_panel = panel
+        # Also on the menu bar's command row, just before Settings.
+        button = QToolButton(self.menuBar().cornerWidget())
+        button.setDefaultAction(panel)
+        button.setText("Help panel")
+        button.setAutoRaise(True)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self._corner_layout.insertWidget(self._corner_layout.count() - 1, button)
+        self.help_panel_button = button
         self.sidebar.currentRowChanged.connect(
             lambda row: self.help_panel.show_stage(STAGES[row].key) if row >= 0 else None
         )
@@ -381,6 +396,10 @@ class MainWindow(QMainWindow):
     def _update_title(self) -> None:
         self.setWindowTitle(f"{self.session.display_name}[*] — {APP_NAME}")
         self.setWindowModified(self.session.dirty)
+        name = self.session.project.name or "Untitled project"
+        self.rail_project.setText(name + (" (unsaved changes)" if self.session.dirty else ""))
+        path = self.session.path
+        self.rail_project.setToolTip(str(path) if path else "Not saved yet")
 
     @Slot()
     def _refresh_status(self) -> None:
@@ -874,6 +893,37 @@ class MainWindow(QMainWindow):
             self.tasks.cancel_all()
             if not self.tasks.wait_for_done(5000):
                 log.warning("Background tasks did not stop within 5 s at shutdown")
+        self._remember_window()
         save_settings(self.settings)
         self.recovery.discard()  # closed normally: nothing to recover
         event.accept()
+
+    # ------------------------------------------------------------------ window layout
+
+    def _help_panel_default(self) -> bool:
+        """The help panel starts open only where it does not crowd the pages (wide screens)."""
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        return screen is not None and screen.availableGeometry().width() >= WIDE_SCREEN_WIDTH
+
+    def _restore_window(self) -> None:
+        """Last session's size and position; on first run, a size that suits the screen."""
+        saved = self.settings.window_geometry
+        if not (saved and self.restoreGeometry(QByteArray.fromBase64(saved.encode("ascii")))):
+            screen = QGuiApplication.primaryScreen()
+            if screen is None:
+                self.resize(1280, 800)
+            else:
+                area = screen.availableGeometry()
+                width = max(min(1600, int(area.width() * 0.92)), self.minimumWidth())
+                height = max(min(1000, int(area.height() * 0.9)), self.minimumHeight())
+                self.resize(width, height)
+                self.move(area.center() - self.rect().center())
+        shown = self.settings.help_panel
+        self.properties_dock.setVisible(self._help_panel_default() if shown is None else shown)
+
+    def _remember_window(self) -> None:
+        self.settings.window_geometry = bytes(self.saveGeometry().toBase64().data()).decode("ascii")
+        shown = self.properties_dock.isVisible()
+        # Only a choice that differs from the automatic default is kept, so the panel keeps
+        # adapting to the screen until the user decides otherwise.
+        self.settings.help_panel = None if shown == self._help_panel_default() else shown

@@ -75,10 +75,10 @@ NONE_ITEM = "(none)"
 
 
 def step_title(number: int, total: int, title: str) -> str:
-    """Rich-text wizard title: a small "STEP n OF m" line above the title."""
+    """Rich-text wizard title: a small "Step n of m" line above the title."""
     return (
-        f"<span style='font-size:7.5pt; font-weight:700; color:{TOKENS['accent']};'>"
-        f"STEP {number} OF {total}</span><br>"
+        f"<span style='font-size:8.5pt; font-weight:600; color:{TOKENS['accent']};'>"
+        f"Step {number} of {total}</span><br>"
         f"<span style='font-size:12pt; font-weight:600; color:{TOKENS['text']};'>{title}</span>"
     )
 

@@ -49,7 +49,6 @@ MIN_DRAG_PX = 6  # shorter drags are treated as clicks, not zooms
 PIN_COLOUR = "#0072B2"  # vertical line marking the pinned point in time
 HEADER_HEIGHT = 16  # px of the per-chart name header
 HEADER_TEXT = "#3b4754"
-HEADER_MUTED = "#8a96a3"
 
 
 @dataclass
@@ -141,10 +140,10 @@ class TrendView(QWidget):
         self.fit_button = QPushButton("Fit all")
         self.fit_button.setToolTip("Show all data")
         self.fit_button.clicked.connect(self.fit_all)
-        self.hint = QLabel("Drag to zoom · click to pin · right-click to copy or save")
+        self.hint = QLabel("Drag to zoom, click to pin, right-click to copy or save")
         self.hint.setToolTip(
-            "Drag across a chart to zoom to that period · wheel zooms · middle-drag pans · "
-            "click pins the values at a time · right-click copies or saves the charts"
+            "Drag across a chart to zoom to that period. The wheel zooms, middle-drag pans, a "
+            "click pins the values at a time, and right-click copies or saves the charts."
         )
         self.hint.setObjectName("placeholderNote")
         # Clip rather than widen the toolbar when the window is narrow.
@@ -472,14 +471,10 @@ class TrendView(QWidget):
     def _set_header(self, plot: pg.PlotItem, group: list[TrendSeries]) -> None:
         """One-line chart header: a colour key and the name of each series, left-aligned."""
         parts = []
-        for s in group:
+        for s in group:  # units are on the y-axis already
             mark = "●" if s.points else "━"
-            units = (
-                f" <span style='color:{HEADER_MUTED}'>[{escape(s.units)}]</span>" if s.units else ""
-            )
             parts.append(
-                f"<span style='color:{self._colour_for(s.name)}'>{mark}</span>&nbsp;"
-                f"{escape(s.name)}{units}"
+                f"<span style='color:{self._colour_for(s.name)}'>{mark}</span>&nbsp;{escape(s.name)}"
             )
         plot.setTitle(
             "&nbsp;&nbsp;&nbsp;".join(parts), size="8pt", color=HEADER_TEXT, justify="left"

@@ -42,8 +42,11 @@ class FlowLayout(QLayout):
         return self._arrange(QRect(0, 0, width, 0), apply=False)
 
     def setGeometry(self, rect: QRect) -> None:  # noqa: N802
+        width_changed = rect.width() != self.geometry().width()
         super().setGeometry(rect)
         self._arrange(rect, apply=True)
+        if width_changed:
+            self.invalidate()  # the minimum height (number of lines) depends on the width
 
     def sizeHint(self) -> QSize:  # noqa: N802
         # Preferred: everything on one line.
@@ -59,7 +62,13 @@ class FlowLayout(QLayout):
         for item in self._visible():
             size = size.expandedTo(item.minimumSize())
         m: QMargins = self.contentsMargins()
-        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+        size += QSize(m.left() + m.right(), m.top() + m.bottom())
+        # Never squeezed below the lines it needs at its current width: when a page is short,
+        # the space comes from the table below, and wrapped buttons never overlap it.
+        width = self.geometry().width()
+        if width > 0:
+            size.setHeight(max(size.height(), self.heightForWidth(width)))
+        return size
 
     # -- helpers -----------------------------------------------------------------
 
@@ -89,5 +98,9 @@ def flow_row(*widgets: QWidget, spacing: int = 6) -> QWidget:
     layout = FlowLayout(row, spacing=spacing)
     for w in widgets:
         layout.addWidget(w)
-    row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+    # Height-for-width: the parent layout reserves the wrapped height, so a second line of
+    # buttons never slides under the table below.
+    policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+    policy.setHeightForWidth(True)
+    row.setSizePolicy(policy)
     return row

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from html import escape
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QTextOption
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from inferential_studio.core.splits import PURGED, TEST, TRAIN, VALIDATION
@@ -21,6 +24,7 @@ SPLIT_COLOURS = {
 SPLIT_NAMES = {TRAIN: "Training", VALIDATION: "Validation", TEST: "Final test"}
 AXIS_WIDTH = 72
 TEXT_MUTED = "#596675"  # theme text_muted (kept literal: widgets do not import the theme)
+KEY_TEXT = "#3b4754"  # chart header text
 POSITIVE = "#0072B2"
 NEGATIVE = "#D55E00"
 
@@ -37,11 +41,14 @@ _DATA_ITEMS = (
 
 
 class ChartPlotItem(pg.PlotItem):
-    """Plot that shows a short centred message instead of bare axes while it holds no data.
+    """Plot with an automatic empty state and a key in the header instead of a legend box.
 
-    The empty state is automatic: :meth:`clear` (or a new chart) shows the message and hides
-    axes, grid and legend; adding the first item that carries data restores them. Pages set
-    the message with :meth:`set_empty_text` to say what is missing ("Train models first.").
+    Empty state: :meth:`clear` (or a new chart) shows a short centred message and hides axes,
+    grid and key; adding the first item that carries data restores them. Pages set the message
+    with :meth:`set_empty_text` to say what is missing ("Train models first.").
+
+    Key: after :meth:`enable_key` (see :func:`legend`), every named item gets a colour mark and
+    its name on the chart's title line, left-aligned, so no legend ever covers the data.
     """
 
     def __init__(self, *args, empty_text: str = EMPTY_TEXT, **kwargs) -> None:  # noqa: ANN002, ANN003
@@ -53,6 +60,14 @@ class ChartPlotItem(pg.PlotItem):
         self._axes_shown: dict[str, bool] = {}
         self._message = pg.TextItem(empty_text, color=TEXT_MUTED, anchor=(0.5, 0.5))
         self._message.setPos(0.5, 0.5)
+        option = QTextOption(Qt.AlignmentFlag.AlignHCenter)
+        option.setWrapMode(QTextOption.WrapMode.WordWrap)
+        self._message.textItem.document().setDefaultTextOption(option)
+        self.vb.sigResized.connect(self._fit_message)
+        self._title = ""
+        self._title_args: dict = {}
+        self._key_enabled = False
+        self._key: list[tuple[int, str, str, str]] = []  # (id(item), mark, colour, name)
         self._empty = False
         self._set_empty(True)
 
@@ -68,6 +83,16 @@ class ChartPlotItem(pg.PlotItem):
 
     def set_empty_text(self, text: str) -> None:
         self._message.setText(text)
+        self._fit_message()
+
+    def enable_key(self) -> None:
+        """Show named items as a key on the title line (call once, before plotting)."""
+        self._key_enabled = True
+        self._render_header()
+
+    @property
+    def key_names(self) -> list[str]:
+        return [name for _id, _mark, _colour, name in self._key]
 
     # -- PlotItem overrides ---------------------------------------------------
 
@@ -76,22 +101,77 @@ class ChartPlotItem(pg.PlotItem):
         if not self._empty:
             super().showGrid(x, y, alpha)
 
-    def addLegend(self, *args, **kwargs) -> pg.LegendItem:  # noqa: ANN002, ANN003, N802
-        legend = super().addLegend(*args, **kwargs)
-        legend.setVisible(not self._empty)
-        return legend
+    def showAxis(self, axis: str, show: bool = True) -> None:  # noqa: N802
+        # setLabel() shows its axis: while empty, remember the wish and keep it hidden.
+        if getattr(self, "_empty", False) and axis in ("left", "bottom"):
+            self._axes_shown[axis] = show
+            super().showAxis(axis, False)
+            return
+        super().showAxis(axis, show)
+
+    def setTitle(self, title=None, **args) -> None:  # noqa: ANN001, ANN003, N802
+        if not hasattr(self, "_key"):  # PlotItem.__init__ hides the title before we are set up
+            super().setTitle(title, **args)
+            return
+        self._title = title or ""
+        self._title_args = args
+        self._render_header()
 
     def addItem(self, item, *args, **kwargs) -> None:  # noqa: ANN001, ANN002, ANN003, N802
         super().addItem(item, *args, **kwargs)
-        if self._empty and item is not self._message and _has_data(item):
+        if item is self._message:
+            return
+        if self._key_enabled:
+            entry = _key_entry(item)
+            if entry is not None and entry[2] not in {n for *_x, n in self._key}:
+                self._key.append((id(item), *entry))
+                self._render_header()
+        if self._empty and _has_data(item):
             self._set_empty(False)
 
+    def removeItem(self, item) -> None:  # noqa: ANN001, N802
+        super().removeItem(item)
+        if any(i == id(item) for i, *_x in self._key):
+            self._key = [k for k in self._key if k[0] != id(item)]
+            self._render_header()
+
     def clear(self) -> None:
+        was_empty = self._empty
         super().clear()  # also removes the message item
-        self._empty = False
-        self._set_empty(True)
+        self._key = []
+        if was_empty:  # still empty: keep the saved axis state, put the message back
+            super().addItem(self._message, ignoreBounds=True)
+            self.vb.setRange(xRange=(0, 1), yRange=(0, 1), padding=0)
+        else:
+            self._set_empty(True)
+        self._render_header()
 
     # -- internals ------------------------------------------------------------
+
+    def _fit_message(self) -> None:
+        """Wrap the empty-state message to the plot width (it never runs off the edges)."""
+        width = self.vb.width()
+        if width > 0:
+            self._message.setTextWidth(max(width - 32, 120))
+
+    def _render_header(self) -> None:
+        """Title line: the chart title (left-aligned, semibold) followed by the key, if any."""
+        key = self._key if self._key_enabled and not self._empty else []
+        if not key and not self._title:
+            super().setTitle(None)
+            return
+        parts = []
+        if self._title:
+            parts.append(
+                f"<span style='font-size:9.5pt; font-weight:600'>{escape(self._title)}</span>"
+            )
+        parts += [
+            f"<span style='color:{colour}'>{mark}</span>&nbsp;{escape(name)}"
+            for _id, mark, colour, name in key
+        ]
+        super().setTitle(
+            "&nbsp;&nbsp;&nbsp;&nbsp;".join(parts), color=KEY_TEXT, size="8pt", justify="left"
+        )
 
     def _set_empty(self, empty: bool) -> None:
         if empty == self._empty:
@@ -104,8 +184,6 @@ class ChartPlotItem(pg.PlotItem):
             for side in ("left", "bottom"):
                 self.getAxis(side).hide()
             super().showGrid(False, False)
-            if self.legend is not None:
-                self.legend.setVisible(False)
             super().addItem(self._message, ignoreBounds=True)
             self.vb.setMouseEnabled(False, False)
             self.vb.setRange(xRange=(0, 1), yRange=(0, 1), padding=0)
@@ -115,10 +193,36 @@ class ChartPlotItem(pg.PlotItem):
                 self.getAxis(side).setVisible(shown)
             if any(v is not None for v in self._grid):
                 super().showGrid(*self._grid)
-            if self.legend is not None:
-                self.legend.setVisible(True)
             self.vb.setMouseEnabled(*self._mouse)
             self.enableAutoRange()
+        self._render_header()
+
+
+def _colour_name(spec: object) -> str:
+    return pg.mkColor(spec).name() if spec is not None else KEY_TEXT
+
+
+def _key_entry(item: object) -> tuple[str, str, str] | None:
+    """(mark, colour, name) for a named data item; None for unnamed or decoration items."""
+    name_of = getattr(item, "name", None)
+    name = name_of() if callable(name_of) else None
+    if not name:
+        return None
+    if isinstance(item, pg.PlotDataItem):
+        o = item.opts
+        if o.get("pen") is None and o.get("symbol") is not None:
+            return "●", _colour_name(pg.mkBrush(o.get("symbolBrush")).color()), name
+        if o.get("pen") is None and o.get("fillLevel") is not None:
+            return "■", _colour_name(pg.mkBrush(o.get("fillBrush")).color()), name
+        pen = pg.mkPen(o.get("pen"))
+        dashed = pen.style() in (Qt.PenStyle.DashLine, Qt.PenStyle.DotLine)
+        return ("┄" if dashed else "━"), _colour_name(pen.color()), name
+    if isinstance(item, pg.ScatterPlotItem):
+        return "●", _colour_name(pg.mkBrush(item.opts.get("brush")).color()), name
+    if isinstance(item, pg.BarGraphItem):
+        brush = item.opts.get("brush") or (item.opts.get("brushes") or [None])[0]
+        return "■", _colour_name(pg.mkBrush(brush).color()), name
+    return None
 
 
 def _has_data(item: object) -> bool:
@@ -154,7 +258,7 @@ def plot_widget(
         w.getAxis(side).enableAutoSIPrefix(False)  # show values as they are, no "(x0.001)"
     w.getAxis("left").setWidth(AXIS_WIDTH)
     if title:
-        w.setTitle(title, color="#333333", size="10pt")
+        w.setTitle(title)
     return w
 
 
@@ -173,12 +277,12 @@ def clear_placeholder(plot: pg.PlotWidget) -> None:
     plot.clear()
 
 
-def legend(plot: pg.PlotWidget, corner: str = "top-left") -> pg.LegendItem:
-    """Legend with an opaque background; ``corner`` keeps it clear of where the data usually is."""
-    offsets = {"top-left": (5, 5), "top-right": (-5, 5), "bottom-right": (-5, -5)}
-    return plot.addLegend(
-        offset=offsets[corner], labelTextSize="8pt", brush=(255, 255, 255, 230), pen="#cccccc"
-    )
+def legend(plot: pg.PlotWidget, corner: str = "top-left") -> None:  # noqa: ARG001
+    """Name the plotted series in the chart header (a key that never covers the data).
+
+    ``corner`` is accepted for older callers and ignored: the key always sits on the title line.
+    """
+    chart_item(plot).enable_key()
 
 
 def scatter(plot: pg.PlotItem | pg.PlotWidget, x, y, colour: str, name: str | None = None,  # noqa: ANN001

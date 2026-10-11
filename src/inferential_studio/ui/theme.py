@@ -64,14 +64,14 @@ QMenuBar QToolButton {{ background: transparent; border: none; border-radius: 3p
                         color: {T["text"]}; }}
 QMenuBar QToolButton:hover {{ background: {T["accent_soft"]}; }}
 QMenuBar QToolButton:pressed {{ background: #c8dcee; }}
+QMenuBar QToolButton:checked {{ background: {T["accent_soft"]}; color: {T["accent_pressed"]}; }}
 QMenuBar QToolButton:disabled {{ color: {T["text_faint"]}; }}
 QMenuBar QFrame#menuBarSeparator {{ background: {T["border"]}; margin: 7px 6px; }}
 
 /* ---- navigation rail --------------------------------------------------------------- */
 QWidget#rail {{ background: {T["rail"]}; }}
 QLabel#railTitle {{ color: #ffffff; font-weight: 600; font-size: 10.5pt; padding: 14px 16px 0 16px; }}
-QLabel#railSubtitle {{ color: {T["text_faint"]}; font-size: 7.5pt; letter-spacing: 1px;
-                       padding: 2px 16px 12px 16px; }}
+QLabel#railSubtitle {{ color: {T["text_faint"]}; font-size: 8.5pt; padding: 2px 16px 14px 16px; }}
 QListWidget#sidebar {{ background: {T["rail"]}; color: {T["rail_text"]}; border: none; outline: none; }}
 QListWidget#sidebar::item {{ color: {T["rail_text"]}; background: transparent; border: none;
                              border-left: 3px solid transparent; padding: 4px 12px; margin: 0; }}
@@ -82,7 +82,7 @@ QListWidget#sidebar::item:selected:!active {{ background: {T["rail_selected"]}; 
 
 /* ---- page header ------------------------------------------------------------------- */
 QFrame#pageHeader {{ background: {T["surface"]}; border: none; border-bottom: 1px solid {T["border"]}; }}
-QLabel#pageEyebrow {{ color: {T["accent"]}; font-size: 7.5pt; font-weight: 700; letter-spacing: 1px; }}
+QLabel#pageEyebrow {{ color: {T["accent"]}; font-size: 8.5pt; font-weight: 600; }}
 QLabel#pageTitle {{ font-size: 14pt; font-weight: 600; color: {T["text"]}; }}
 QLabel#pageGoal {{ color: {T["text_muted"]}; }}
 QLabel#placeholderNote {{ color: {T["text_muted"]}; font-size: 8.5pt; }}
@@ -109,6 +109,7 @@ QTableView, QTableWidget, QTreeWidget, QListWidget, QTextBrowser, QPlainTextEdit
     background: {T["surface"]}; border: 1px solid {T["border"]}; gridline-color: #e4e8ed;
     selection-background-color: {T["accent_soft"]}; selection-color: {T["text"]};
     alternate-background-color: {T["surface_alt"]}; }}
+QHeaderView {{ background: {T["surface"]}; }}  /* no grey band under the last row */
 QHeaderView::section {{ background: {T["surface_alt"]}; color: {T["text_muted"]}; font-weight: 600;
                         border: none; border-right: 1px solid #e4e8ed; border-bottom: 1px solid {T["border"]};
                         padding: 4px 6px; }}
@@ -137,6 +138,8 @@ QPushButton[primary="true"]:hover {{ background: {T["accent_hover"]}; }}
 QPushButton[primary="true"]:pressed {{ background: {T["accent_pressed"]}; }}
 QPushButton[primary="true"]:disabled {{ background: #9fb7cc; border-color: #9fb7cc; color: #eef3f7; }}
 QToolButton {{ border-radius: 3px; padding: 3px 8px; }}
+QToolButton#iconButton {{ padding: 0; min-width: 24px; min-height: 24px; color: {T["text_muted"]}; }}
+QToolButton#iconButton:hover {{ color: {T["error"]}; background: {T["error_soft"]}; }}
 QToolButton:hover {{ background: {T["accent_soft"]}; }}
 QCheckBox, QRadioButton {{ spacing: 6px; }}
 
@@ -154,7 +157,7 @@ QDockWidget::title {{ background: {T["surface_alt"]}; padding: 6px 8px; border-b
 QDockWidget#propertiesDock QTextBrowser {{ border: none; padding: 6px; }}
 QFrame#messagePanel {{ background: {T["surface"]}; border: none; border-top: 2px solid {T["border_strong"]}; }}
 QFrame#messagePanel[flash="true"] {{ border-top: 2px solid {T["warning"]}; }}
-QLabel#messageTitle {{ color: {T["text_muted"]}; font-weight: 700; font-size: 7.5pt; letter-spacing: 1px; }}
+QLabel#messageTitle {{ color: {T["text_muted"]}; font-weight: 600; }}
 QLabel#badgeError {{ background: {T["error_soft"]}; color: {T["error"]}; border-radius: 8px;
                      padding: 0 8px; font-weight: 600; font-size: 8pt; }}
 QLabel#badgeWarning {{ background: {T["warning_soft"]}; color: {T["warning"]}; border-radius: 8px;

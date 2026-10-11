@@ -267,6 +267,7 @@ def test_table_numbers_are_readable():
 def test_charts_show_a_message_until_they_hold_data(qtbot):
     from inferential_studio.ui.widgets.plots import (
         EMPTY_TEXT,
+        bar_chart,
         chart_item,
         legend,
         plot_widget,
@@ -277,20 +278,44 @@ def test_charts_show_a_message_until_they_hold_data(qtbot):
     qtbot.addWidget(plot)
     legend(plot)
     item = chart_item(plot)
-    # A new chart is empty: message instead of bare 0-1 axes, no legend box.
+    # A new chart is empty: message instead of bare 0-1 axes, no key in the header.
     assert item.is_empty and item.empty_text == EMPTY_TEXT
-    assert not item.getAxis("left").isVisible() and not item.legend.isVisible()
+    assert not item.getAxis("left").isVisible() and item.legend is None
     plot.addItem(pg.InfiniteLine(0.5))  # reference lines alone are not data
     plot.plot([], [])
     assert item.is_empty
     plot.plot([0, 1, 2], [1, 3, 2], name="data")
     assert not item.is_empty
-    assert item.getAxis("left").isVisible() and item.legend.isVisible()
+    assert item.getAxis("left").isVisible() and item.key_names == ["data"]
+    assert "data" in item.titleLabel.text and "Residual vs predicted" in item.titleLabel.text
     assert item.vb.autoRangeEnabled() == [True, True]
     show_placeholder(plot, "Train models first.")
     assert item.is_empty and item.empty_text == "Train models first."
+    assert item.key_names == [] and "data" not in item.titleLabel.text
     plot.clear()  # the page's own message stays until data arrives
     assert item.is_empty and item.empty_text == "Train models first."
+    plot.setLabel("left", "Mean RMSE")  # labelling an empty chart must not bring its axis back
+    assert not item.getAxis("left").isVisible()
+    # Clearing an already-empty chart must not lose its axes (the coefficient chart did).
+    bar_chart(plot, ["a", "b"], np.array([1.0, -0.5]))
+    assert not item.is_empty and item.getAxis("left").isVisible()
+    assert item.getAxis("bottom").isVisible()
+
+
+def test_chart_key_marks_follow_the_series_style(qtbot):
+    from inferential_studio.ui.widgets.plots import chart_item, legend, plot_widget, scatter
+
+    plot = plot_widget()
+    qtbot.addWidget(plot)
+    legend(plot, "bottom-right")  # the corner is ignored: the key sits in the header
+    scatter(plot, [1, 2], [1, 2], "#0072B2", "Training")
+    plot.plot([0, 1], [0, 1], pen=pg.mkPen("#666666", style=Qt.PenStyle.DashLine), name="identity")
+    plot.plot([0, 1], [1, 0], pen=pg.mkPen("#D55E00"), name="Prediction")
+    plot.plot([0, 1], [1, 0], pen=pg.mkPen("#999999"))  # unnamed: not in the key
+    item = chart_item(plot)
+    assert item.key_names == ["Training", "identity", "Prediction"]
+    header = item.titleLabel.text
+    assert "●" in header and "┄" in header and "━" in header and "#0072b2" in header.lower()
 
 
 def test_every_chart_uses_the_standard_menu(qtbot, monkeypatch, tmp_path):
@@ -333,3 +358,38 @@ def test_chart_menu_has_copy_and_save_only(qtbot):
     from PySide6.QtGui import QGuiApplication
 
     assert not QGuiApplication.clipboard().pixmap().isNull()
+
+
+def test_summary_table_fits_its_rows(qtbot):
+    from inferential_studio.ui.widgets.data_table import DataTableView
+
+    table = DataTableView()
+    qtbot.addWidget(table)
+    table.resize(600, 400)
+    table.fit_to_rows(max_rows=6)
+    table.set_frame(pd.DataFrame({"RMSE": [0.1, 0.2, 0.3, 0.4]}, index=list("ABCD")))
+    table.show()
+    qtbot.wait(10)
+    header = table.horizontalHeader().sizeHint().height()
+    assert table.height() == header + 4 * 22 + 2 * table.frameWidth()  # no empty band
+    table.set_frame(pd.DataFrame({"RMSE": np.arange(20.0)}))
+    assert table.height() == header + 6 * 22 + 2 * table.frameWidth()  # then it scrolls
+
+
+def test_flow_row_reserves_its_wrapped_height(qtbot):
+    from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
+
+    from inferential_studio.ui.widgets.flow_layout import flow_row
+
+    holder = QWidget()
+    qtbot.addWidget(holder)
+    row = flow_row(*(QPushButton(f"Button number {i}") for i in range(6)))
+    layout = QVBoxLayout(holder)
+    layout.addWidget(row)
+    layout.addStretch(1)
+    holder.resize(260, 400)
+    holder.show()
+    qtbot.wait(10)
+    buttons = row.findChildren(QPushButton)
+    assert len({b.y() for b in buttons}) > 1  # wrapped onto several lines
+    assert all(b.geometry().bottom() <= row.height() for b in buttons)  # none spills out

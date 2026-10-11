@@ -225,6 +225,10 @@ class TrainingPage(StagePage):
             self.tabs.setTabEnabled(self.tabs.indexOf(tab), latent)
         if latent:
             self._fill_latent_controls(m)
+        else:
+            for plot in (self.load_plot, self.score_plot, self.var_plot):
+                show_placeholder(plot, f"{m.spec.label} has no latent components: loadings, "
+                                       "VIP, scores and explained variance apply to PLS and PCR.")  # fmt: skip
         if m.warnings:
             msgs.set("training.model", Level.WARNING, f"{m.name}: " + " ".join(m.warnings),
                      also=("validation",))  # fmt: skip

@@ -113,9 +113,11 @@ Listed in workflow order.
 `plots.plot_widget` or `chart_menu.add_plot` so they get it),
 `trend_view.py` (synchronized trend charts: drag-to-zoom, Back, Fit all), `cursor_readout.py`
 (values at cursor), `overlays.py` (exclusion shading), `time_axis.py` (timezone-aware axis),
-`plots.py` (chart helpers, empty-chart placeholder), `heatmap.py`, `data_table.py` (pandas table
-view; number formatting in `format_value`), `variable_list.py`, `timezone_combo.py`,
-`task_progress.py` (status-bar progress/cancel).
+`plots.py` (`plot_widget` / `ChartPlotItem`: empty-state message and series key in the chart
+header), `heatmap.py`, `data_table.py` (pandas table view; number formatting in `format_value`,
+`fit_to_rows` for short summary tables), `flow_layout.py` (button rows that wrap on narrow
+windows), `variable_list.py`, `timezone_combo.py`, `task_progress.py` (status-bar
+progress/cancel).
 
 ## `tests/`
 

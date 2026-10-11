@@ -120,7 +120,7 @@ class MessagePanel(QFrame):
         self._stage: str | None = None
         self._icons = {lvl: level_icon(lvl) for lvl in Level}
 
-        title = QLabel("MESSAGES")
+        title = QLabel("Messages")
         title.setObjectName("messageTitle")
         self.badges = {lvl: QLabel() for lvl in (Level.ERROR, Level.WARNING)}
         for lvl, badge in self.badges.items():

@@ -305,15 +305,15 @@ class CleaningPage(StagePage):
                 "The selected flags are valid process behaviour",
             ),
             ("Reset", lambda: self._decide(None), "Back to pending review"),
-            ("Zoom to", self._zoom_event, "Show the selected event on the chart"),
         ):
             b = QPushButton(text)
             b.setToolTip(tip)
             b.clicked.connect(slot)
             ev_buttons.append(b)
         self.events_note = QLabel(
-            "Flags never delete data: pending flags are only highlighted; accepted flags exclude "
-            "that variable's values; rejected flags are kept as valid."
+            "Double-click an event to show it on the chart. Flags never delete data: pending "
+            "flags are only highlighted, accepted flags exclude that variable's values, and "
+            "rejected flags are kept as valid."
         )
         self.events_note.setObjectName("placeholderNote")
         self.events_note.setWordWrap(True)
