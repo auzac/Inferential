@@ -168,7 +168,9 @@ class ProjectSession(QObject):
 
     def _recompute_now(self) -> None:
         frame, mask, target = self.frames()
-        results = self.detector_results if self.detector_results_version == self.data_version else {}
+        results = (
+            self.detector_results if self.detector_results_version == self.data_version else {}
+        )
         self.cleaning = compute_cleaning(self._project, frame, mask, results, target)
         self.cleaning_changed.emit()
 
@@ -178,7 +180,9 @@ class ProjectSession(QObject):
         self._cleaning_running = True
         serial = self._cleaning_serial
         frame, mask, target = self.frames()
-        results = self.detector_results if self.detector_results_version == self.data_version else {}
+        results = (
+            self.detector_results if self.detector_results_version == self.data_version else {}
+        )
         self._tasks.submit(
             "Recalculating exclusions",
             _compute_cleaning_task,

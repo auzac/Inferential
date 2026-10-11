@@ -162,9 +162,7 @@ def test_trend_view_drag_creates_synced_band(qtbot):
     view._bands[0][1].setRegion((float(x[8]), float(x[20])))
     assert all(r.getRegion() == (float(x[8]), float(x[20])) for _plot, r in view._bands)
     # A click anywhere else removes the highlight.
-    view._click_point(
-        view.plots[0].vb, _click_event(view, float(x[60]), Qt.MouseButton.LeftButton)
-    )
+    view._click_point(view.plots[0].vb, _click_event(view, float(x[60]), Qt.MouseButton.LeftButton))
     assert view._bands == []
 
 
@@ -174,9 +172,7 @@ def test_trend_view_right_click_raises_plot_menu(qtbot, monkeypatch):
     x = to_epoch_seconds(pd.date_range("2026-01-01", periods=100, freq="1min", tz="UTC"))
     view.set_series([TrendSeries("A", x, np.arange(100.0))])
     calls: list[Qt.MouseButton] = []
-    monkeypatch.setattr(
-        pg.ViewBox, "raiseContextMenu", lambda self, ev: calls.append(ev.button())
-    )
+    monkeypatch.setattr(pg.ViewBox, "raiseContextMenu", lambda self, ev: calls.append(ev.button()))
     view.plots[0].vb.mouseClickEvent(_click_event(view, float(x[50]), Qt.MouseButton.RightButton))
     assert calls == [Qt.MouseButton.RightButton]
 

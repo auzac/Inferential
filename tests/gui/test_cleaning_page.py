@@ -57,9 +57,11 @@ def low_load_rule() -> ExclusionRule:
 
 def wait_detection(qtbot, w):
     qtbot.waitUntil(
-        lambda: not w.tasks.busy
-        and w.session.detector_results_version == w.session.data_version
-        and not w.session._cleaning_running,
+        lambda: (
+            not w.tasks.busy
+            and w.session.detector_results_version == w.session.data_version
+            and not w.session._cleaning_running
+        ),
         timeout=30000,
     )
 

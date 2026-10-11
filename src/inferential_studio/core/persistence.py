@@ -214,8 +214,13 @@ def _v2_to_v3(project_data: Any) -> Any:
     return project_data
 
 
+def _v3_to_v4(project_data: Any) -> Any:
+    """v4 added alignment options and modelling configuration (defaults when absent)."""
+    return project_data
+
+
 # Map "from version" -> function converting project JSON to version + 1.
-_MIGRATIONS: dict[int, Any] = {1: _v1_to_v2, 2: _v2_to_v3}
+_MIGRATIONS: dict[int, Any] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4}
 
 
 def migrate(project_data: Any, from_version: int) -> Any:

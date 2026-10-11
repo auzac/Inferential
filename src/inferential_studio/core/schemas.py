@@ -28,7 +28,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SCHEMA_VERSION = 3  # 1 = M0; 2 = native timestamps, duplicate policy, sample ids; 3 = rules, detectors, flag reviews
+SCHEMA_VERSION = 4  # 1 = M0; 2 = native timestamps, duplicate policy, sample ids;
+# 3 = rules, detectors, flag reviews; 4 = alignment options, splits and model configurations
 
 
 class SchemaError(ValueError):
@@ -636,6 +637,156 @@ class FlagDecision:
         return (self.detector_id, self.variable, self.start, self.end)
 
 
+# --------------------------------------------------------------------------- alignment and modelling
+
+
+@dataclass(frozen=True)
+class AlignmentConfig:
+    """Project-wide rules for turning process data into one feature row per lab sample."""
+
+    # A sample is not model-eligible when any predictor's aggregation window overlaps an
+    # operating-regime exclusion (shutdown, start-up …), even if coverage would still pass.
+    reject_regime_overlap: bool = True
+
+
+class Scaling(StrEnum):
+    STANDARD = "standard"  # (x - mean) / std, fitted on training samples only
+    ROBUST = "robust"  # (x - median) / IQR, fitted on training samples only
+    NONE = "none"
+
+
+class ModelKind(StrEnum):
+    MLR = "mlr"
+    PLS = "pls"
+    PCR = "pcr"
+    RIDGE = "ridge"
+
+
+MODEL_LABELS = {
+    ModelKind.MLR: "MLR (ordinary least squares)",
+    ModelKind.PLS: "PLS regression",
+    ModelKind.PCR: "PCR (PCA + regression)",
+    ModelKind.RIDGE: "Ridge regression",
+}
+
+
+class SplitMode(StrEnum):
+    FRACTIONS = "fractions"  # by share of eligible samples, in time order
+    DATES = "dates"  # explicit boundary instants
+
+
+class CvKind(StrEnum):
+    EXPANDING = "expanding"  # rolling origin: train on the past, validate on the next block
+    BLOCKED = "blocked"  # contiguous k-fold blocks with a purge gap either side
+
+
+@dataclass(frozen=True)
+class SplitConfig:
+    """Chronological train / validation / final test split and the training-set CV.
+
+    Fractions: the first ``train_fraction`` of eligible samples (in time order) train, the next
+    ``validation_fraction`` validate, the rest is the untouched final test.
+    Dates: train ``t < train_end``, validation ``train_end <= t < validation_end``, test after.
+    ``purge_s`` = None picks the purge gap automatically (longest feature history).
+    """
+
+    mode: SplitMode = SplitMode.FRACTIONS
+    train_fraction: float = 0.6
+    validation_fraction: float = 0.2
+    train_end: datetime | None = None
+    validation_end: datetime | None = None
+    purge_s: float | None = None
+    cv_kind: CvKind = CvKind.EXPANDING
+    cv_folds: int = 5
+
+    def __post_init__(self) -> None:
+        _coerce_enum(self, "mode", SplitMode)
+        _coerce_enum(self, "cv_kind", CvKind)
+        _finite(self.train_fraction, "Training fraction", allow_none=False)
+        _finite(self.validation_fraction, "Validation fraction", allow_none=False)
+        _finite(self.purge_s, "Purge gap")
+        if not 0.0 < self.train_fraction < 1.0:
+            raise SchemaError("The training fraction must be between 0 and 1.")
+        if not 0.0 <= self.validation_fraction < 1.0:
+            raise SchemaError("The validation fraction must be between 0 and 1.")
+        if self.train_fraction + self.validation_fraction >= 1.0:
+            raise SchemaError("Training and validation together must leave samples for the test.")
+        for name in ("train_end", "validation_end"):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, ensure_utc(value, name))
+        if self.mode is SplitMode.DATES:
+            if self.train_end is None or self.validation_end is None:
+                raise SchemaError("Date-based splits need both a training end and a test start.")
+            if self.validation_end < self.train_end:
+                raise SchemaError("The test period must start at or after the training end.")
+        if self.purge_s is not None and self.purge_s < 0:
+            raise SchemaError("The purge gap cannot be negative.")
+        if not isinstance(self.cv_folds, int) or isinstance(self.cv_folds, bool):
+            raise SchemaError("The number of CV folds must be a whole number.")
+        if not 2 <= self.cv_folds <= 20:
+            raise SchemaError("Use between 2 and 20 cross-validation folds.")
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    """One candidate model. ``None`` hyperparameters are tuned by time-aware CV on training data."""
+
+    kind: ModelKind
+    enabled: bool = True
+    n_components: int | None = None  # PLS / PCR
+    max_components: int = 10  # PLS / PCR tuning range 1..max
+    alpha: float | None = None  # Ridge
+    alpha_min: float = 1e-3
+    alpha_max: float = 1e3
+    alpha_steps: int = 13
+
+    def __post_init__(self) -> None:
+        _coerce_enum(self, "kind", ModelKind)
+        _finite(self.alpha, "Ridge alpha")
+        _finite(self.alpha_min, "Smallest alpha", allow_none=False)
+        _finite(self.alpha_max, "Largest alpha", allow_none=False)
+        for name in ("n_components", "max_components", "alpha_steps"):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, int) or isinstance(value, bool)):
+                raise SchemaError(f"{name.replace('_', ' ')} must be a whole number.")
+        if self.n_components is not None and self.n_components < 1:
+            raise SchemaError("The number of components must be at least 1.")
+        if not 1 <= self.max_components <= 50:
+            raise SchemaError("The component search range must be 1–50.")
+        if self.alpha is not None and self.alpha <= 0:
+            raise SchemaError("Ridge alpha must be positive.")
+        if not 0 < self.alpha_min < self.alpha_max:
+            raise SchemaError("The alpha search range must satisfy 0 < smallest < largest.")
+        if not 2 <= self.alpha_steps <= 50:
+            raise SchemaError("Use 2–50 alpha values in the search.")
+
+    @property
+    def label(self) -> str:
+        return MODEL_LABELS[self.kind]
+
+
+def default_model_specs() -> tuple[ModelSpec, ...]:
+    return tuple(ModelSpec(kind) for kind in ModelKind)
+
+
+@dataclass(frozen=True)
+class ModellingConfig:
+    scaling: Scaling = Scaling.STANDARD
+    split: SplitConfig = field(default_factory=SplitConfig)
+    models: tuple[ModelSpec, ...] = field(default_factory=default_model_specs)
+    # Tuning picks the simplest setting whose CV error is within one standard error of the best.
+    one_standard_error: bool = True
+
+    def __post_init__(self) -> None:
+        _coerce_enum(self, "scaling", Scaling)
+        object.__setattr__(self, "models", tuple(self.models))
+        _require_unique([m.kind.value for m in self.models], "model type")
+
+    def spec(self, kind: ModelKind) -> ModelSpec | None:
+        return next((m for m in self.models if m.kind is kind), None)
+
+
 # --------------------------------------------------------------------------- project
 
 
@@ -652,6 +803,8 @@ class Project:
     rules: list[ExclusionRule] = field(default_factory=list)
     detectors: list[DetectorConfig] = field(default_factory=list)
     flag_decisions: list[FlagDecision] = field(default_factory=list)
+    alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
+    modelling: ModellingConfig = field(default_factory=ModellingConfig)
     notes: str = ""
     created_at: datetime = field(default_factory=utc_now)
     modified_at: datetime = field(default_factory=utc_now)

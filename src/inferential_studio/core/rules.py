@@ -35,8 +35,23 @@ class RuleError(ValueError):
 
 
 def ns(index: pd.DatetimeIndex) -> np.ndarray:
-    """Timestamps as int64 nanoseconds whatever the index resolution (pandas 3 may use µs)."""
-    return pd.DatetimeIndex(index).as_unit("ns").asi8
+    """Timestamps as int64 nanoseconds whatever the index resolution (pandas 3 may use µs).
+
+    Scales the integers directly: ``as_unit("ns")`` copies through a slow path on big indexes.
+    """
+    idx = pd.DatetimeIndex(index)
+    factor = _NS_PER_UNIT[idx.unit]
+    i8 = idx.asi8
+    if factor == 1:
+        return i8
+    nat = i8 == np.iinfo(np.int64).min
+    out = i8 * factor
+    if nat.any():
+        out[nat] = np.iinfo(np.int64).min
+    return out
+
+
+_NS_PER_UNIT = {"s": 1_000_000_000, "ms": 1_000_000, "us": 1_000, "ns": 1}
 
 
 def median_interval_ns(index: pd.DatetimeIndex) -> int:

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 
 class CursorReadout(QGroupBox):
-    """"At cursor" box shown below the variable selection on the trend pages."""
+    """ "At cursor" box shown below the variable selection on the trend pages."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("At cursor", parent)
