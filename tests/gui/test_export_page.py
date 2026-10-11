@@ -17,6 +17,7 @@ from inferential_studio.infrastructure.recovery import find_recovery_copies
 from inferential_studio.infrastructure.settings import AppSettings
 from inferential_studio.ui.help import GuideDialog
 from inferential_studio.ui.main_window import MainWindow
+from inferential_studio.ui.messages import Level
 
 EXAMPLE_DIR = Path(__file__).resolve().parents[2] / "examples" / "synthetic_distillation"
 
@@ -61,7 +62,8 @@ def test_dataset_to_report_workflow(trained, qtbot, tmp_path):
     w = trained
     w.sidebar.setCurrentRow(8)
     page = w.pages["export"]
-    assert not page.banner.isVisible() and page.btn_report.isEnabled()
+    assert page.btn_report.isEnabled()
+    assert w.session.messages.condition("training.state").level == Level.INFO
     assert not page.include_test.isEnabled()  # final test not revealed yet
     page.title.setText("Top purity soft sensor")
     page.purpose.setPlainText("Estimate purity between lab samples.")
@@ -110,7 +112,8 @@ def test_saved_results_are_reproduced_on_reopen(trained, qtbot, tmp_path):
     qtbot.waitUntil(lambda: w.session.training is not None and idle(w), timeout=60000)
     assert w.session.reproduction and w.session.reproduction.startswith("✓"), w.session.reproduction
     assert w.session.test_revealed  # having looked at the test is remembered
-    assert w.session.reproduction in w.pages["validation"].banner.text()
+    shown = w.session.messages.conditions("validation")
+    assert any(m.text == w.session.reproduction for m in shown)
 
 
 def test_portable_copy_opens_without_the_original_files(trained, qtbot, tmp_path):

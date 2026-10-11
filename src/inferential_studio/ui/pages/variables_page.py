@@ -31,6 +31,7 @@ from inferential_studio.core.schemas import SourceKind
 from inferential_studio.core.statistics import preliminary_xy_correlation
 from inferential_studio.infrastructure.workers import TaskManager
 from inferential_studio.ui.commands import edit_lists
+from inferential_studio.ui.messages import Level
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
@@ -107,7 +108,6 @@ class VariablesPage(StagePage):
         none_btn = QPushButton("None")
         all_btn.clicked.connect(lambda: self._check_all(True))
         none_btn.clicked.connect(lambda: self._check_all(False))
-        self.selection_note = note_label()
         left = QWidget()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
@@ -119,13 +119,15 @@ class VariablesPage(StagePage):
         row.addWidget(none_btn)
         row.addStretch(1)
         ll.addLayout(row)
-        ll.addWidget(self.selection_note)
 
         # -- right: diagnostics tabs ---------------------------------------------
         self.tabs = QTabWidget()
         self.ranking = DataTableView()
-        self.ranking_note = note_label()
-        self.warnings = note_label()
+        self.ranking_note = note_label(
+            "Ranked by |Pearson r| with the target on aligned, model-eligible samples. VIF = 1 / (1 − R²) "
+            "of each predictor regressed on the others. Thresholds raise warnings in the message panel; "
+            "nothing is removed automatically."
+        )
         self.threshold = QDoubleSpinBox()
         self.threshold.setRange(0.5, 0.999)
         self.threshold.setSingleStep(0.01)
@@ -141,7 +143,6 @@ class VariablesPage(StagePage):
         trow.addWidget(self.threshold)
         trow.addStretch(1)
         tl.addLayout(trow)
-        tl.addWidget(self.warnings)
         self.tabs.addTab(tab, "Ranking && VIF")
 
         self.method = QComboBox()
@@ -185,12 +186,10 @@ class VariablesPage(StagePage):
         self._raw_clean_tab = tab
         self.tabs.addTab(tab, "Raw vs cleaned")
 
-        self.status = note_label()
         split = QSplitter(Qt.Orientation.Horizontal)
         split.addWidget(left)
         split.addWidget(self.tabs)
         split.setSizes([260, 900])
-        self.body.addWidget(self.status)
         self.body.addWidget(split, 1)
 
         session.changed.connect(self._refresh_selection)
@@ -232,11 +231,10 @@ class VariablesPage(StagePage):
     def _update_selection_note(self) -> None:
         project = self._session.project
         n = len(project.predictors)
-        fm = self._session.features
-        text = f"{n} predictor(s) selected."
-        if fm is not None:
-            text += f" {fm.n_eligible:,} of {len(fm.y):,} lab samples are model-eligible."
-        self.selection_note.setText(text)
+        target = project.target.name if project.target else "no target"
+        self._session.messages.set(
+            "variables.selection", Level.INFO, f"Target: {target}; {n} predictor(s) selected."
+        )
 
     def _check_all(self, checked: bool) -> None:
         self.predictors.list.blockSignals(True)
@@ -265,15 +263,8 @@ class VariablesPage(StagePage):
     def _on_features(self) -> None:
         fm = self._session.features
         self._diag = None
-        if fm is None:
-            msg = self._session.features_error or "Aligning features…"
-            self.status.setText(msg)
-        else:
+        if fm is not None:
             _times, X, y = fm.eligible_data()
-            self.status.setText(
-                f"Aligned on {fm.n_eligible:,} model-eligible lab samples "
-                f"({len(fm.y):,} in total). Feature settings are edited on Signal Processing."
-            )
             if len(y) >= 3:
                 self._diag = aligned_diagnostics(X, y, threshold=self.threshold.value())
         self._update_selection_note()
@@ -287,8 +278,10 @@ class VariablesPage(StagePage):
             self.ranking.set_frame(pd.DataFrame())
             self.impact.set_frame(pd.DataFrame())
             self.heatmap.set_matrix(pd.DataFrame())
-            self.ranking_note.setText("Diagnostics appear once at least 3 samples are eligible.")
-            self.warnings.setText("")
+            self._session.messages.set(
+                "variables.collinearity", Level.INFO,
+                "Diagnostics appear once at least 3 samples are eligible." if fm is not None else "",
+            )  # fmt: skip
             return
         table = diag.xy.copy()
         table.insert(0, "units", [units.get(n) or "" for n in table.index])
@@ -298,11 +291,6 @@ class VariablesPage(StagePage):
             table["screen_raw"] = self._raw_clean["r_y_raw"].reindex(table.index)
             table["screen_cleaned"] = self._raw_clean["r_y_cleaned"].reindex(table.index)
         self.ranking.set_frame(table, RANKING_HEADERS)
-        self.ranking_note.setText(
-            f"Ranked by |Pearson r| with {fm.target} on {diag.n_rows:,} aligned, model-eligible "
-            "samples. VIF = 1 / (1 − R²) of each predictor regressed on the others. Thresholds are "
-            "warnings, not automatic deletions."
-        )
         pairs = high_correlation_pairs(diag.pearson, self.threshold.value())
         notes = []
         high_vif = diag.vif.index[diag.vif["vif"] > VIF_WARNING].tolist()
@@ -316,7 +304,10 @@ class VariablesPage(StagePage):
             notes.append(f"Highly correlated pairs: {listed}.")
         if notes:
             notes.append("Consider PLS, PCR or Ridge, or keep one variable of each group.")
-        self.warnings.setText(" ".join(notes) or "No collinearity warnings at these thresholds.")
+        self._session.messages.set(
+            "variables.collinearity", Level.WARNING if notes else Level.INFO,
+            " ".join(notes) or "No collinearity warnings at these thresholds.",
+        )  # fmt: skip
 
         method = self.method.currentData()
         _t, X, y = fm.eligible_data()
@@ -380,9 +371,12 @@ class VariablesPage(StagePage):
     def _raw_clean_done(self, table: pd.DataFrame | None, key: object, error: str = "") -> None:
         self._raw_clean_pending = False
         if table is None:
-            self.raw_clean_note.setText(f"Comparison failed: {error}")
+            self._session.messages.set(
+                "variables.rawclean", Level.ERROR, f"Raw-vs-cleaned comparison failed: {error}"
+            )
             return
         self._raw_clean, self._raw_clean_key = table, key
+        self._session.messages.clear("variables.rawclean")
         state = self._session.cleaning
         if state is None or key != (self._session.data_version, id(state)):
             self._ensure_raw_clean()  # cleaning changed meanwhile

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QToolButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -46,6 +47,7 @@ from inferential_studio.infrastructure.settings import AppSettings, save_setting
 from inferential_studio.infrastructure.workers import TaskManager
 from inferential_studio.ui.help import GuideDialog, HelpPanel
 from inferential_studio.ui.import_wizard import ImportPlan, ImportWizard
+from inferential_studio.ui.messages import APP
 from inferential_studio.ui.pages.cleaning_page import CleaningPage
 from inferential_studio.ui.pages.eda_page import EdaPage
 from inferential_studio.ui.pages.export_page import ExportPage
@@ -60,6 +62,7 @@ from inferential_studio.ui.project_dialog import ProjectSettingsDialog
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.settings_dialog import SettingsDialog
 from inferential_studio.ui.stages import STAGES
+from inferential_studio.ui.widgets.message_panel import MessagePanel
 from inferential_studio.ui.widgets.task_progress import TaskProgressWidget
 
 log = logging.getLogger(__name__)
@@ -80,6 +83,7 @@ class MainWindow(QMainWindow):
         self._build_menus_and_toolbar()
         self._build_central()
         self._build_properties_panel()
+        self._build_message_panel()
         self._build_status_bar()
         self.session.changed.connect(self._refresh_status)
         self.session.data_changed.connect(self._refresh_status)
@@ -230,7 +234,7 @@ class MainWindow(QMainWindow):
     def _build_central(self) -> None:
         self.sidebar = QListWidget(self)
         self.sidebar.setObjectName("sidebar")
-        self.sidebar.setFixedWidth(230)
+        self.sidebar.setFixedWidth(232)
         self.sidebar.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         # Stable item geometry prevents text clipping when Windows DPI scaling
         # or a Qt stylesheet changes the rendered font/padding.
@@ -274,15 +278,29 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(f"{stage.number}.  {stage.title}")
             # Use an explicit row height rather than relying on QSS padding
             # to expand QListWidget's cached size hints.
-            item.setSizeHint(QSize(0, 40))
+            item.setSizeHint(QSize(0, 36))
             item.setData(Qt.ItemDataRole.UserRole, stage.key)
             item.setToolTip(stage.goal)
             self.sidebar.addItem(item)
         self.sidebar.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.sidebar.setCurrentRow(0)
         self.sidebar.scrollToTop()
+        rail = QWidget()
+        rail.setObjectName("rail")
+        rail.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        rail_layout = QVBoxLayout(rail)
+        rail_layout.setContentsMargins(0, 0, 0, 0)
+        rail_layout.setSpacing(0)
+        rail_title = QLabel(APP_NAME)
+        rail_title.setObjectName("railTitle")
+        rail_sub = QLabel("WORKFLOW")
+        rail_sub.setObjectName("railSubtitle")
+        rail_layout.addWidget(rail_title)
+        rail_layout.addWidget(rail_sub)
+        rail_layout.addWidget(self.sidebar, 1)
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.sidebar)
+        splitter.setHandleWidth(0)
+        splitter.addWidget(rail)
         splitter.addWidget(self.stack)
         splitter.setStretchFactor(1, 1)
         splitter.setCollapsible(0, False)
@@ -307,6 +325,27 @@ class MainWindow(QMainWindow):
             lambda row: self.help_panel.show_stage(STAGES[row].key) if row >= 0 else None
         )
         self.help_panel.show_stage(STAGES[max(self.sidebar.currentRow(), 0)].key)
+
+    def _build_message_panel(self) -> None:
+        """Fixed-height message log along the bottom of the window (never moves page content)."""
+        self.message_panel = MessagePanel(self.session.messages)
+        dock = QDockWidget("Messages", self)
+        dock.setObjectName("messageDock")
+        dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        dock.setTitleBarWidget(QWidget(dock))  # no title bar: it is part of the window frame
+        dock.setWidget(self.message_panel)
+        self.setCorner(Qt.Corner.BottomRightCorner, Qt.DockWidgetArea.BottomDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomLeftCorner, Qt.DockWidgetArea.BottomDockWidgetArea)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+        self.message_dock = dock
+        self.sidebar.currentRowChanged.connect(
+            lambda row: self.message_panel.set_stage(STAGES[row].key) if row >= 0 else None
+        )
+        self.message_panel.set_stage(STAGES[max(self.sidebar.currentRow(), 0)].key)
+
+    def notify(self, text: str, source: str = APP) -> None:
+        """An informational event (formerly a transient status-bar message)."""
+        self.session.messages.info(text, source)
 
     def _build_status_bar(self) -> None:
         status = self.statusBar()
@@ -351,12 +390,9 @@ class MainWindow(QMainWindow):
             act.setEnabled(not busy)
 
     def show_error(self, title: str, message: str, details: str = "") -> None:
-        box = QMessageBox(
-            QMessageBox.Icon.Warning, title, message, QMessageBox.StandardButton.Ok, self
-        )
-        if details:
-            box.setDetailedText(details)
-        box.exec()
+        """Report a problem in the message panel (double-click it for the details)."""
+        stage = STAGES[max(self.sidebar.currentRow(), 0)].key
+        self.session.messages.error(f"{title}: {message}", stage, details)
 
     # ------------------------------------------------------------------ project commands
 
@@ -394,6 +430,10 @@ class MainWindow(QMainWindow):
         self.undo_stack.clear()
         self._remember(path)
         log.info("Opened project %s (%s)", path, self.session.storage)
+        self.notify(
+            f"Opened {Path(path).name}"
+            + (" (portable)" if self.session.storage == "portable" else "")
+        )
         self._reproduce_pending = self.session.saved_results is not None
         self.recovery.discard()
         self.load_data()
@@ -448,6 +488,7 @@ class MainWindow(QMainWindow):
         else:
             self.session.set_data(data)
         if not data.failures:
+            self.notify(f"Loaded {len(data.sources)} data source(s).")
             return
         lines = [f"• {sid}: {exc}" for sid, exc in data.failures.items()]
         self.show_error(
@@ -531,10 +572,9 @@ class MainWindow(QMainWindow):
             return
         self.sidebar.setCurrentRow(0)
         warnings = sum(i.severity is Severity.WARNING for i in data.report.issues)
-        self.statusBar().showMessage(
+        self.notify(
             f"Imported {data.report.n_rows:,} rows from {Path(data.source.path).name}"
-            + (f" — {warnings} warning(s), see the validation report" if warnings else ""),
-            8000,
+            + (f" — {warnings} warning(s), see the validation report" if warnings else "")
         )
 
     # ------------------------------------------------------------------ anomaly detection
@@ -637,7 +677,7 @@ class MainWindow(QMainWindow):
         self._remember(path)
         self.recovery.discard()
         kind = "portable project (data included)" if self.session.storage == "portable" else ""
-        self.statusBar().showMessage(f"Saved {path.name} {kind}".strip(), 4000)
+        self.notify(f"Saved {path.name} {kind}".strip())
         return True
 
     @Slot()
@@ -739,7 +779,7 @@ class MainWindow(QMainWindow):
             on_error=lambda msg, details: self.show_error(
                 "Example generation failed", msg, details
             ),
-            on_cancelled=lambda: self.statusBar().showMessage("Example generation cancelled", 4000),
+            on_cancelled=lambda: self.notify("Example generation cancelled"),
         )
 
     @Slot()
@@ -754,7 +794,7 @@ class MainWindow(QMainWindow):
             self.generate_example_to(Path(folder) / default.name)
 
     def _example_ready(self, paths: dict[str, Path]) -> None:
-        self.statusBar().showMessage(f"Example written to {paths['project'].parent}", 6000)
+        self.notify(f"Example written to {paths['project'].parent}")
         answer = QMessageBox.question(
             self,
             "Example ready",

@@ -53,9 +53,11 @@ from inferential_studio.ui.cleaning_dialogs import (
     RuleDialog,
 )
 from inferential_studio.ui.commands import edit_lists
+from inferential_studio.ui.messages import Level
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
+from inferential_studio.ui.theme import mark_primary
 from inferential_studio.ui.widgets.cursor_readout import CursorReadout
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.overlays import IntervalShade, mask_spans
@@ -147,8 +149,7 @@ class CleaningPage(StagePage):
         self.exclude_button = QPushButton("Exclude selection…")
         self.exclude_button.setEnabled(False)
         self.exclude_button.clicked.connect(self._exclude_selection)
-        self.status = QLabel()
-        self.status.setObjectName("placeholderNote")
+        mark_primary(self.exclude_button)
         bar = QHBoxLayout()
         bar.addWidget(QLabel("View:"))
         for b in (self.view_raw, self.view_flagged, self.view_cleaned):
@@ -156,7 +157,7 @@ class CleaningPage(StagePage):
         bar.addSpacing(16)
         bar.addWidget(self.select_button)
         bar.addWidget(self.exclude_button)
-        bar.addWidget(self.status, 1)
+        bar.addStretch(1)
 
         # -- chart area -----------------------------------------------------------
         self.variables = VariableList()
@@ -308,8 +309,12 @@ class CleaningPage(StagePage):
             b.clicked.connect(slot)
             ev_buttons.addWidget(b)
         ev_buttons.addStretch(1)
-        self.events_note = QLabel()
+        self.events_note = QLabel(
+            "Flags never delete data: pending flags are only highlighted; accepted flags exclude "
+            "that variable's values; rejected flags are kept as valid."
+        )
         self.events_note.setObjectName("placeholderNote")
+        self.events_note.setWordWrap(True)
 
         left = QWidget()
         ll = QVBoxLayout(left)
@@ -363,7 +368,7 @@ class CleaningPage(StagePage):
         try:
             edit_lists(self._undo, self._session, text, **lists)
         except ValueError as exc:
-            QMessageBox.warning(self, "Cannot apply change", str(exc))
+            self._session.messages.error(f"Cannot apply change: {exc}", "cleaning")
 
     def _all_variables(self) -> list[str]:
         frame, _m, target = self._session.frames()
@@ -417,7 +422,7 @@ class CleaningPage(StagePage):
         state = self._session.cleaning
         if frame.empty:
             self.trends.set_series([])
-            self.status.setText("No process data loaded.")
+            self._session.messages.set("cleaning.status", Level.INFO, "No process data loaded.")
             return
         cleaned_view = self.view_cleaned.isChecked() and state is not None
         x = to_epoch_seconds(frame.index)
@@ -529,20 +534,27 @@ class CleaningPage(StagePage):
 
     def _update_status(self) -> None:
         state = self._session.cleaning
+        msgs = self._session.messages
         if state is None:
-            self.status.setText("")
+            msgs.clear("cleaning.status")
+            msgs.clear("cleaning.rules")
             return
         n = len(state.index)
         regime = int(state.regime.sum())
         pending_events = sum(e.status == EventStatus.PENDING for e in state.events)
-        errors = (
-            f" · {len(state.rule_errors)} rule(s) could not be evaluated"
-            if state.rule_errors
-            else ""
+        msgs.set(
+            "cleaning.status",
+            Level.INFO,
+            f"{regime:,} of {n:,} rows excluded for all variables ({100 * regime / max(n, 1):.1f}%); "
+            f"{pending_events} flag event(s) awaiting review.",
         )
-        self.status.setText(
-            f"{regime:,} of {n:,} rows excluded for all variables ({100 * regime / max(n, 1):.1f}%) · "
-            f"{pending_events} flag event(s) awaiting review{errors}"
+        msgs.set(
+            "cleaning.rules",
+            Level.ERROR,
+            f"{len(state.rule_errors)} rule(s) could not be evaluated: "
+            + "; ".join(state.rule_errors.values())
+            if state.rule_errors
+            else "",
         )
 
     # ------------------------------------------------------------------ range selection
@@ -750,8 +762,8 @@ class CleaningPage(StagePage):
 
     def _add_rule(self) -> None:
         if not self._rule_variables():
-            QMessageBox.information(
-                self, "Rules", "Import process data first; rules are evaluated on it."
+            self._session.messages.warning(
+                "Rules: import process data first; rules are evaluated on it.", "cleaning"
             )
             return
         dialog = RuleDialog(
@@ -847,7 +859,7 @@ class CleaningPage(StagePage):
     def _add_detector(self) -> None:
         names = self._all_variables()
         if not names:
-            QMessageBox.information(self, "Anomaly detection", "Import data first.")
+            self._session.messages.warning("Anomaly detection: import data first.", "cleaning")
             return
         dialog = DetectorDialog(None, names, self._tz, self)
         if dialog.exec():
@@ -886,7 +898,7 @@ class CleaningPage(StagePage):
     def _add_recommended(self) -> None:
         new = self.recommended_detectors()
         if not new:
-            QMessageBox.information(self, "Anomaly detection", "Import data first.")
+            self._session.messages.warning("Anomaly detection: import data first.", "cleaning")
             return
         self._edit("Add recommended detectors", detectors=[*self._session.project.detectors, *new])
 
@@ -970,12 +982,12 @@ class CleaningPage(StagePage):
             self._session.project.detectors
             and self._session.detector_results_version != self._session.data_version
         ):
-            self.events_note.setText("Running detectors…")
+            self._session.messages.set("cleaning.detectors", Level.INFO, "Running detectors…")
         else:
-            self.events_note.setText(
-                f"Showing {len(events)} of {total} event(s). Flags never delete data: pending flags are only "
-                "highlighted; accepted flags exclude that variable's values; rejected flags are kept as valid."
-            )
+            self._session.messages.set(
+                "cleaning.detectors", Level.INFO,
+                f"Flag events: showing {len(events)} of {total}." if total else "",
+            )  # fmt: skip
 
     def _decide(self, decision: FlagDecisionKind | None) -> None:
         events = self._selected_data(self.events_table)

@@ -48,9 +48,11 @@ from inferential_studio.core.splits import (
     chronological_split,
 )
 from inferential_studio.ui.commands import edit_lists
+from inferential_studio.ui.messages import Level
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
+from inferential_studio.ui.theme import mark_primary
 from inferential_studio.ui.widgets.plots import (
     SPLIT_COLOURS,
     SPLIT_NAMES,
@@ -264,18 +266,17 @@ class ModelSetupPage(StagePage):
         form.addRow("CV (training only)", self.cv_kind)
         form.addRow("CV folds", self.cv_folds)
         form.addRow("", self.one_se)
-        self.config_error = note_label()
 
         self.train_button = QPushButton("Train models")
         self.train_button.setMinimumHeight(34)
         self.train_button.clicked.connect(self.train_requested.emit)
+        mark_primary(self.train_button)
 
         left = QWidget()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
         ll.addWidget(models_box)
         ll.addWidget(split_box)
-        ll.addWidget(self.config_error)
         ll.addWidget(
             note_label(
                 "Hyperparameters are tuned only inside the training period. The validation period "
@@ -284,11 +285,9 @@ class ModelSetupPage(StagePage):
                 "windows would share process data with the next period."
             )
         )
-        ll.addWidget(self.train_button)
         ll.addStretch(1)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(left)
 
         # -- split preview ------------------------------------------------------------
@@ -296,19 +295,20 @@ class ModelSetupPage(StagePage):
             "Lab samples by period", time_axis=session.project.display_timezone
         )
         legend(self.split_plot, "bottom-right")
-        self.split_note = note_label()
-        self.problems = note_label()
         right = QWidget()
         rl = QVBoxLayout(right)
         rl.setContentsMargins(0, 0, 0, 0)
         rl.addWidget(self.split_plot, 1)
-        rl.addWidget(self.split_note)
-        rl.addWidget(self.problems)
 
         split = QSplitter(Qt.Orientation.Horizontal)
-        split.addWidget(scroll)
+        left_panel = QWidget()
+        lp = QVBoxLayout(left_panel)
+        lp.setContentsMargins(0, 0, 0, 0)
+        lp.addWidget(scroll, 1)
+        lp.addWidget(self.train_button)  # the main action stays visible, outside the scroll area
+        split.addWidget(left_panel)
         split.addWidget(right)
-        split.setSizes([520, 640])
+        split.setSizes([600, 560])
         self.body.addWidget(split, 1)
 
         self._apply_timer = QTimer(self)
@@ -422,9 +422,11 @@ class ModelSetupPage(StagePage):
         try:
             cfg = self.form_config()
         except SchemaError as exc:
-            self.config_error.setText(f"<span style='color:#B00020'>{exc}</span>")
+            self._session.messages.set(
+                "model_setup.config", Level.ERROR, f"Settings not applied: {exc}"
+            )
             return False
-        self.config_error.setText("")
+        self._session.messages.clear("model_setup.config")
         edit_lists(self._undo, self._session, "Model settings", modelling=cfg)
         return True
 
@@ -433,15 +435,17 @@ class ModelSetupPage(StagePage):
         self.split_plot.clear()
         fm = self._session.features
         cfg = self._session.project.modelling
+        msgs = self._session.messages
         if fm is None:
-            self.split_note.setText(self._session.features_error or "Aligning features…")
-            self.problems.setText("")
+            msgs.clear("model_setup.split")
+            msgs.clear_prefix("model_setup.problem.")
             self.train_button.setEnabled(False)
             return
         try:
             res = chronological_split(fm.sample_time, fm.eligible, cfg.split, fm.max_history_s())
         except SplitError as exc:
-            self.split_note.setText(str(exc))
+            msgs.set("model_setup.split", Level.ERROR, str(exc))
+            msgs.clear_prefix("model_setup.problem.")
             self.train_button.setEnabled(False)
             return
         x = to_epoch_seconds(fm.sample_time)
@@ -457,24 +461,27 @@ class ModelSetupPage(StagePage):
                 self.split_plot.addItem(pg.InfiniteLine(pos, angle=90, pen=pg.mkPen("#555555", style=Qt.PenStyle.DashLine)))  # fmt: skip
         self.split_plot.setLabel("left", f"{fm.target}")
         counts = res.counts()
-        self.split_note.setText(
+        msgs.set(
+            "model_setup.split", Level.INFO,
             f"Training {counts[TRAIN]}, validation {counts[VALIDATION]}, final test {counts[TEST]} "
             f"samples; {counts[PURGED]} in purge gaps of {res.purge_s / 60:g} min; "
             f"{counts['not eligible']} not eligible. Longest feature history: "
-            f"{fm.max_history_s() / 60:g} min."
-        )
+            f"{fm.max_history_s() / 60:g} min.",
+        )  # fmt: skip
         if self.auto_purge.isChecked():
             self._loading = True
             self.purge.setValue(res.purge_s / 60)
             self._loading = False
         tr = res.labels == TRAIN
         problems = check_feasibility(fm.X[tr].reset_index(drop=True), fm.y[tr], res)
-        lines = [("✖ " if p.severity == ERROR else "⚠ ") + p.message for p in problems]
-        if fm.non_causal:
-            lines.append("⚠ Non-causal features: " + ", ".join(fm.non_causal))
+        items = [
+            (Level.ERROR if p.severity == ERROR else Level.WARNING, p.message) for p in problems
+        ]
         if not any(m.enabled for m in cfg.models):
-            lines.append("✖ Select at least one model.")
-        self.problems.setText("<br>".join(lines) or "Ready to train.")
+            items.append((Level.ERROR, "Select at least one model."))
+        msgs.clear_prefix("model_setup.problem.")
+        for i, (level, text) in enumerate(items):
+            msgs.set(f"model_setup.problem.{i}", level, text)
         blocked = any(p.severity == ERROR for p in problems) or not any(
             m.enabled for m in cfg.models
         )

@@ -28,6 +28,7 @@ from inferential_studio.core.schemas import SourceKind, VariableRole
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
+from inferential_studio.ui.theme import mark_primary
 
 SEVERITY_STYLE = {
     Severity.ERROR: ("Error", QColor("#b00020")),
@@ -50,6 +51,7 @@ class ImportPage(StagePage):
 
         buttons = QHBoxLayout()
         self.import_process = QPushButton("Import process data…")
+        mark_primary(self.import_process)
         self.import_process.clicked.connect(lambda: self.import_requested.emit(SourceKind.PROCESS))
         self.import_lab = QPushButton("Import lab / analyzer data…")
         self.import_lab.clicked.connect(lambda: self.import_requested.emit(SourceKind.LAB))

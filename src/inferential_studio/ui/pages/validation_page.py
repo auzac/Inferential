@@ -39,9 +39,9 @@ COMPARISON_HEADERS = {
     "status": "Status",
     "cv_rmse": "CV RMSE (train)",
     **{
-        f"{s}_{k}": f"{SPLIT_NAMES[s]} {k.upper() if k != 'r2' else 'R²'}"
+        f"{s}_{k}": f"{SPLIT_NAMES[s]} {label}"
         for s in SPLITS
-        for k in ("r2", "rmse", "mae", "bias")
+        for k, label in (("r2", "R²"), ("rmse", "RMSE"), ("mae", "MAE"), ("bias", "bias"))
     },  # fmt: skip
 }
 REVEAL_TEXT = (
@@ -59,12 +59,6 @@ class ValidationPage(StagePage):
         super().__init__(stage, parent)
         self._session = session
 
-        self.banner = QLabel()
-        self.banner.setWordWrap(True)
-        self.banner.setStyleSheet(
-            "background:#FFF4E5; color:#7A4100; padding:6px; border:1px solid #F0C080;"
-        )
-        self.banner.setVisible(False)
         self.comparison = DataTableView()
         self.comparison.setMinimumHeight(140)
         self.comparison_note = note_label()
@@ -73,6 +67,8 @@ class ValidationPage(StagePage):
         self.model_combo = QComboBox()
         self.model_combo.currentIndexChanged.connect(self._show_model)
         self.metrics = DataTableView(sortable=False)
+        # Header + three periods, always fully visible.
+        self.metrics.setFixedHeight(28 + 3 * 22 + 6)
 
         top = QWidget()
         tl = QVBoxLayout(top)
@@ -123,7 +119,10 @@ class ValidationPage(StagePage):
         al.addWidget(self.applicability, 1)
         al.addWidget(self.app_note)
         self.tabs.addTab(abox, "Applicability")
-        self.plot_note = note_label()
+        self.plot_note = note_label(
+            "Training = fitted samples; Validation = used to compare models; Final test = untouched "
+            "until revealed."
+        )
 
         bottom = QWidget()
         bl = QVBoxLayout(bottom)
@@ -134,7 +133,6 @@ class ValidationPage(StagePage):
         split.addWidget(top)
         split.addWidget(bottom)
         split.setSizes([360, 440])
-        self.body.addWidget(self.banner)
         self.body.addWidget(split, 1)
 
         session.training_changed.connect(self.refresh)
@@ -161,16 +159,6 @@ class ValidationPage(StagePage):
     def refresh(self) -> None:
         run = self._session.training
         revealed = self._session.test_revealed
-        lines = [self._session.reproduction] if self._session.reproduction else []
-        if self._session.training_stale:
-            lines.append("Settings or data changed since training: these results are out of date.")
-        if revealed:
-            lines.append(
-                "Final test results are shown. Model or setting changes made after looking at them "
-                "make the test exploratory."
-            )
-        self.banner.setVisible(bool(lines))
-        self.banner.setText("<br>".join(lines))
         self.reveal_button.setEnabled(
             bool(run is not None and not revealed and run.split.mask(TEST).any())
         )
@@ -179,7 +167,7 @@ class ValidationPage(StagePage):
         self.model_combo.clear()
         if run is None:
             self.comparison.set_frame(pd.DataFrame())
-            self.comparison_note.setText("Train models on the Model Setup page first.")
+            self.comparison_note.setText("")
             self.model_combo.blockSignals(False)
             self._show_model()
             return
@@ -197,14 +185,12 @@ class ValidationPage(StagePage):
             (v.units for v in self._session.project.variables if v.name == run.target), None
         )
         self.comparison_note.setText(
-            f"Ranked by {ranked}. Errors in {units or 'target units'}; bias = mean(predicted − actual). "
-            "Prefer a model that is accurate and also simple, stable and physically sensible over "
-            "the highest training R². Fit metrics alone do not show online readiness."
-            + (
-                ""
-                if revealed
-                else " Final-test columns are hidden until you choose to reveal them."
-            )
+            f"Ranked by {ranked}. Errors in {units or 'target units'}; bias = mean(predicted − actual)."
+            + ("" if revealed else " Final-test columns stay hidden until revealed.")
+        )
+        self.comparison_note.setToolTip(
+            "Prefer a model that is accurate and also simple, stable and physically sensible over the "
+            "highest training R². Fit metrics alone do not show online readiness."
         )
         self.res_x_var.blockSignals(True)
         self.res_x_var.clear()
@@ -228,7 +214,6 @@ class ValidationPage(StagePage):
         if m is None:
             self.metrics.set_frame(pd.DataFrame())
             self.applicability.set_frame(pd.DataFrame())
-            self.plot_note.setText("")
             return
         shown = self.splits_shown()
         metrics = m.metrics.loc[list(shown)].rename(index=SPLIT_NAMES)
@@ -239,13 +224,6 @@ class ValidationPage(StagePage):
         self._residuals(pred)
         self._update_residual_x()
         self._applicability()
-        note = (
-            "Train = fitted samples; Validation = used to compare models; Final test = untouched "
-            "until revealed."
-        )
-        if m.warnings:
-            note += " ⚠ " + " ⚠ ".join(m.warnings)
-        self.plot_note.setText(note)
 
     def _by_split(self, pred: pd.DataFrame):  # noqa: ANN202
         for split in SPLITS:

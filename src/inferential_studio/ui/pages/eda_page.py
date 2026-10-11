@@ -29,6 +29,7 @@ from inferential_studio.core.statistics import (
     histogram,
 )
 from inferential_studio.infrastructure.workers import TaskManager
+from inferential_studio.ui.messages import Level
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
@@ -235,19 +236,15 @@ class EdaPage(StagePage):
         }
         self.tabs.currentChanged.connect(lambda _i: self._update_visible_tab())
 
-        self.status = QLabel()
-        self.status.setObjectName("placeholderNote")
         self.recalc = QPushButton("Recalculate")
+        self.recalc.setToolTip("Recalculate the statistics")
         self.recalc.clicked.connect(self.ensure_computed)
-        status_row = QHBoxLayout()
-        status_row.addWidget(self.status, 1)
-        status_row.addWidget(self.recalc)
+        self.tabs.setCornerWidget(self.recalc, Qt.Corner.TopRightCorner)
 
         main = QSplitter(Qt.Orientation.Horizontal)
         main.addWidget(left)
         main.addWidget(self.tabs)
         main.setSizes([220, 900])
-        self.body.addLayout(status_row)
         self.body.addWidget(main, 1)
 
         session.data_changed.connect(self._on_data_changed)
@@ -271,13 +268,19 @@ class EdaPage(StagePage):
         self._units = {v.name: v.units for v in project.variables}
         self._result = None
         self._populate_list()
+        msgs = self._session.messages
         if self._frame.empty:
-            self.status.setText("No process data loaded. Import data on the Data Import page.")
+            msgs.set(
+                "initial_eda.data",
+                Level.INFO,
+                "No process data loaded. Import data on the Data Import page.",
+            )
         else:
             n_lab = 0 if self._target is None else int(self._target.notna().sum())
-            self.status.setText(
-                f"{len(self._frame):,} process rows × {self._frame.shape[1]} variables; {n_lab:,} target samples."
-            )
+            msgs.set(
+                "initial_eda.data", Level.INFO,
+                f"{len(self._frame):,} process rows × {self._frame.shape[1]} variables; {n_lab:,} target samples.",
+            )  # fmt: skip
         self._update_trends(keep_range=False)  # new data: fit all
         if self.isVisible():
             self.ensure_computed()
@@ -336,7 +339,7 @@ class EdaPage(StagePage):
         ):
             return
         version = self._session.data_version
-        self.status.setText(self.status.text().split("  —")[0] + "  — calculating statistics…")
+        self._session.messages.set("initial_eda.calc", Level.INFO, "Calculating statistics…")
         self._pending = self._tasks.submit(
             "Calculating statistics",
             compute_eda,
@@ -355,12 +358,14 @@ class EdaPage(StagePage):
             return
         self._result = result
         self._computed_version = version
-        self.status.setText(self.status.text().split("  —")[0])
+        self._session.messages.clear("initial_eda.calc")
         self._update_visible_tab(all_tabs=True)
 
     def _on_failed(self, message: str) -> None:
         self._pending = None
-        self.status.setText(self.status.text().split("  —")[0] + f"  — {message}")
+        self._session.messages.set(
+            "initial_eda.calc", Level.WARNING, f"Statistics not calculated: {message}"
+        )
 
     # ------------------------------------------------------------------ views
 

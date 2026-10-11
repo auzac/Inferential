@@ -1,8 +1,16 @@
 # User guide
 
-This guide covers **v0.5.0**: all nine stages, from data import to the model card. The **Help**
+This guide covers **v0.5.1**: all nine stages, from data import to the model card. The **Help**
 panel on the right gives a short guide to the stage on screen; **F1** opens this guide inside
 the application (offline).
+
+**Messages.** Every status line, warning and error appears in the fixed **Messages** panel at
+the bottom of the window — never inside the page, so charts and tables stay where they are.
+Messages marked *active* describe the current state (e.g. "2 features read future data") and
+disappear when the cause is fixed; timed entries are events (saved, imported, failed). The panel
+shows the current stage by default (*All stages* shows everything); badges count warnings and
+errors; double-click a message for details; *Copy* puts the list on the clipboard; *Clear*
+removes the history.
 
 ## 1. Start with the example
 
