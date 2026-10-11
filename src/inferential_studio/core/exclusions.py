@@ -292,7 +292,20 @@ def summary_table(
                 "excluded_duration_h": float((ex.sum() * step).total_seconds() / 3600),
             }
         )
-    return pd.DataFrame(rows).set_index("variable")
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "variable",
+            "rows",
+            "valid_values",
+            "invalid_text",
+            "excluded",
+            "pending_review",
+            "usable",
+            "usable_pct",
+            "excluded_duration_h",
+        ],
+    ).set_index("variable")
 
 
 def category_table(state: CleaningState) -> pd.DataFrame:

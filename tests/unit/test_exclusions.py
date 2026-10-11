@@ -178,3 +178,20 @@ def test_summary_counts():
     summary = summary_table(st, FRAME)
     assert summary.loc["A", "excluded"] == 5 and summary.loc["A", "usable"] == 15
     assert summary.loc["A", "excluded_duration_h"] == pytest.approx(5 / 60)
+
+
+def test_summary_table_survives_empty_frame():
+    """An empty frame (no columns) must yield an empty table, not a KeyError."""
+    st = compute_cleaning(make_project(), FRAME)
+    summary = summary_table(st, pd.DataFrame())
+    assert list(summary.index) == []
+    assert set(summary.columns) == {
+        "rows",
+        "valid_values",
+        "invalid_text",
+        "excluded",
+        "pending_review",
+        "usable",
+        "usable_pct",
+        "excluded_duration_h",
+    }

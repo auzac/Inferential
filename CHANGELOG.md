@@ -3,6 +3,27 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## v0.2.1 — Performance: large-data responsiveness (2026-10-11)
+
+### Added
+- "At cursor" readout on the trends pages, below the variable selection: the values of every
+  visible series at the crosshair (fixed height, scrolls when there are many variables).
+- Trends cap at 12 charts at once; more show a note telling the user to untick variables.
+- User guide: trends section updated for the "At cursor" readout.
+
+### Changed
+- Variable selection lists scroll; the trend columns are fixed-width, so long values no
+  longer resize or move the charts.
+- Ticking or unticking a variable updates only the charts it affects instead of rebuilding
+  all charts (and keeps the zoom level).
+- Zoomed-out trends draw from a precomputed 2,048-bin min/max envelope; zooming in switches
+  to the raw samples of the visible window, so panning and zooming stay fast on large data.
+- EDA statistics, correlation and matrix tabs recompute only when visible; selection and
+  checkbox bursts are debounced (150 ms).
+- Exclusion recomputation runs in the background and is coalesced: a burst of edits produces
+  one computation of the latest state, and results from stale edits are discarded.
+- The cleaning summary table is computed only when its tab is open.
+
 ## v0.2.0 — Milestone 2: cleaning and exclusions (2026-10-11)
 
 ### Added

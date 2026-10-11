@@ -57,9 +57,16 @@ def low_load_rule() -> ExclusionRule:
 
 def wait_detection(qtbot, w):
     qtbot.waitUntil(
-        lambda: not w.tasks.busy and w.session.detector_results_version == w.session.data_version,
+        lambda: not w.tasks.busy
+        and w.session.detector_results_version == w.session.data_version
+        and not w.session._cleaning_running,
         timeout=30000,
     )
+
+
+def wait_cleaning(qtbot, w):
+    """The exclusion recompute runs in the background: wait for the latest state to land."""
+    qtbot.waitUntil(lambda: not w.session._cleaning_running, timeout=30000)
 
 
 def test_sample_project_starts_with_two_shutdowns(loaded):
@@ -70,7 +77,7 @@ def test_sample_project_starts_with_two_shutdowns(loaded):
     assert loaded.lbl_exclusions.text().startswith("Excluded rows: 1,802")
 
 
-def test_add_interval_undo_redo(loaded):
+def test_add_interval_undo_redo(loaded, qtbot):
     page = loaded.pages["cleaning"]
     session = loaded.session
     t0 = pd.Timestamp("2026-03-12 00:00", tz="UTC")
@@ -80,15 +87,18 @@ def test_add_interval_undo_redo(loaded):
             start=t0.to_pydatetime(), end=(t0 + pd.Timedelta("59min")).to_pydatetime()
         )
     )
+    wait_cleaning(qtbot, loaded)
     assert int(session.cleaning.regime.sum()) == before + 60  # closed interval, 1-minute data
     assert session.dirty and loaded.undo_stack.count() == 1
     loaded.undo_stack.undo()
+    wait_cleaning(qtbot, loaded)
     assert int(session.cleaning.regime.sum()) == before and len(session.project.exclusions) == 2
     loaded.undo_stack.redo()
+    wait_cleaning(qtbot, loaded)
     assert int(session.cleaning.regime.sum()) == before + 60
 
 
-def test_signal_specific_interval_only_affects_that_variable(loaded):
+def test_signal_specific_interval_only_affects_that_variable(loaded, qtbot):
     page = loaded.pages["cleaning"]
     t0 = pd.Timestamp("2026-03-12 00:00", tz="UTC")
     page.add_interval(
@@ -98,6 +108,7 @@ def test_signal_specific_interval_only_affects_that_variable(loaded):
             signals=("Tray_15_Temp",),
         )
     )
+    wait_cleaning(qtbot, loaded)
     state = loaded.session.cleaning
     rows = state.index.slice_indexer(t0, t0 + pd.Timedelta("9min"))
     assert state.excluded["Tray_15_Temp"].iloc[rows].all()
@@ -109,13 +120,16 @@ def test_rule_toggle_through_table(loaded, qtbot):
     page = loaded.pages["cleaning"]
     session = loaded.session
     edit_lists(loaded.undo_stack, session, "Add rule", rules=[low_load_rule()])
+    wait_cleaning(qtbot, loaded)
     with_rule = int(session.cleaning.regime.sum())
     assert with_rule > 1802
     assert page.rules_table.item(0, 6).text() == "2,182"
     page.rules_table.item(0, 0).setCheckState(page.rules_table.item(0, 0).checkState().Unchecked)
+    wait_cleaning(qtbot, loaded)
     assert int(session.cleaning.regime.sum()) == 1802
     assert not session.project.rules[0].enabled
     loaded.undo_stack.undo()
+    wait_cleaning(qtbot, loaded)
     assert int(session.cleaning.regime.sum()) == with_rule
 
 
@@ -135,6 +149,7 @@ def test_detect_review_and_decide(loaded, qtbot):
     page.events_table.selectRow(0)
     first = page._selected_data(page.events_table)[0]
     page._decide(FlagDecisionKind.ACCEPTED)
+    wait_cleaning(qtbot, loaded)
     state = session.cleaning
     row = state.index.get_loc(first.start)
     assert state.excluded["Column_Pressure"].iloc[row]
@@ -146,6 +161,7 @@ def test_detect_review_and_decide(loaded, qtbot):
     page.events_table.selectRow(0)
     second = page._selected_data(page.events_table)[0]
     page._decide(FlagDecisionKind.REJECTED)
+    wait_cleaning(qtbot, loaded)
     row2 = session.cleaning.index.get_loc(second.start)
     assert not session.cleaning.excluded["Column_Pressure"].iloc[row2]
     assert not session.cleaning.pending["Column_Pressure"].iloc[row2]
@@ -165,6 +181,7 @@ def test_masks_roundtrip_through_save_and_reopen(loaded, qtbot, tmp_path):
     page.event_filter.setCurrentIndex(0)
     page.events_table.selectRow(0)
     page._decide(FlagDecisionKind.ACCEPTED)
+    wait_cleaning(qtbot, loaded)
     before = session.cleaning
     assert before.target.excluded.loc[ev.start]
     assert loaded.save_project_to(tmp_path / "cleaned.imsproj")
@@ -186,10 +203,9 @@ def test_range_selection_and_overlay_items(loaded, qtbot):
     page = loaded.pages["cleaning"]
     page.select_button.setChecked(True)
     assert page._regions and len(page._regions) == len(page.trends.plots)
-    page._regions[0].setRegion(
-        (page._regions[0].getRegion()[0], page._regions[0].getRegion()[0] + 3600)
-    )
-    assert page._regions[-1].getRegion() == page._regions[0].getRegion()  # charts stay in sync
+    first = page._regions[0][1]
+    first.setRegion((first.getRegion()[0], first.getRegion()[0] + 3600))
+    assert page._regions[-1][1].getRegion() == first.getRegion()  # charts stay in sync
     lo, hi = page.selection_utc()
     assert (hi - lo) == pd.Timedelta("1h")
     # One shading item per plot, however many intervals are excluded.

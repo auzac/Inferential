@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QBrush, QColor, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -56,6 +56,7 @@ from inferential_studio.ui.commands import edit_lists
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
+from inferential_studio.ui.widgets.cursor_readout import CursorReadout
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.overlays import IntervalShade, mask_spans
 from inferential_studio.ui.widgets.time_axis import to_epoch_seconds
@@ -117,9 +118,11 @@ class CleaningPage(StagePage):
         self._session = session
         self._undo = undo_stack
         self._settings = settings
-        self._regions: list[pg.LinearRegionItem] = []
+        self._regions: list[tuple[pg.PlotItem, pg.LinearRegionItem]] = []
+        self._overlay_items: list[tuple[pg.PlotItem, pg.GraphicsObject]] = []
         self._syncing = False
         self._selection: tuple[float, float] | None = None
+        self._summary_dirty = True  # summary table is only computed when its tab is visible
 
         # -- toolbar ------------------------------------------------------------
         self.view_raw = QRadioButton("Raw")
@@ -157,11 +160,24 @@ class CleaningPage(StagePage):
 
         # -- chart area -----------------------------------------------------------
         self.variables = VariableList()
-        self.variables.selection_changed.connect(lambda: self._update_trends())
+        # Coalesce bursts of ticks: redraw once, a short pause after the last change.
+        self._trend_timer = QTimer(self)
+        self._trend_timer.setSingleShot(True)
+        self._trend_timer.setInterval(150)
+        self._trend_timer.timeout.connect(self._update_trends)
+        self.variables.selection_changed.connect(self._trend_timer.start)
         self.trends = TrendView(session.project.display_timezone)
         self.trends.rebuilt.connect(self._add_overlays)
+        self.cursor = CursorReadout()
+        self.trends.hover.connect(self.cursor.show_hover)
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
+        left_layout.addWidget(self.variables, 1)  # the list scrolls when there are many tags
+        left_layout.addWidget(self.cursor)
         top = QSplitter(Qt.Orientation.Horizontal)
-        top.addWidget(self.variables)
+        top.addWidget(left)
         top.addWidget(self.trends)
         top.setSizes([200, 900])
 
@@ -170,7 +186,9 @@ class CleaningPage(StagePage):
         self.tabs.addTab(self._build_manual_tab(), "Manual exclusions")
         self.tabs.addTab(self._build_rules_tab(), "Rules")
         self.tabs.addTab(self._build_detection_tab(), "Anomaly detection")
-        self.tabs.addTab(self._build_summary_tab(), "Summary")
+        self._summary_tab = self._build_summary_tab()
+        self.tabs.addTab(self._summary_tab, "Summary")
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
         split = QSplitter(Qt.Orientation.Vertical)
         split.addWidget(top)
@@ -380,8 +398,17 @@ class CleaningPage(StagePage):
         self._fill_rules()
         self._fill_detectors()
         self._fill_events()
-        self._fill_summary()
+        if self.tabs.currentWidget() is self._summary_tab:
+            self._fill_summary()
+        else:
+            self._summary_dirty = True  # the summary scans every row: only when its tab is open
         self._update_trends(keep_range=not full)
+
+    @Slot(int)
+    def _on_tab_changed(self, _index: int) -> None:
+        if self.tabs.currentWidget() is self._summary_tab and self._summary_dirty:
+            self._summary_dirty = False
+            self._fill_summary()
 
     def _update_trends(self, keep_range: bool = True) -> None:
         frame, _mask, target = self._session.frames()
@@ -419,7 +446,13 @@ class CleaningPage(StagePage):
     def _add_overlays(self) -> None:
         frame, _mask, target = self._session.frames()
         state = self._session.cleaning
-        self._regions = []
+        # Plots now survive chart updates, so remove the previous pass's overlays first.
+        for plot, item in self._overlay_items:
+            if isinstance(item, IntervalShade):
+                item.detach()
+            if item.scene() is not None:
+                plot.removeItem(item)
+        self._overlay_items = []
         if state is None or frame.empty:
             return
         x = to_epoch_seconds(frame.index)
@@ -428,13 +461,17 @@ class CleaningPage(StagePage):
         regime_spans = mask_spans(state.regime, x)
         for plot, group in self.trends.groups:
             if show and regime_spans[0].size:
-                IntervalShade(*regime_spans, REGIME_COLOUR, alpha).attach(plot)
+                shade = IntervalShade(*regime_spans, REGIME_COLOUR, alpha)
+                shade.attach(plot)
+                self._overlay_items.append((plot, shade))
             for s in group:
                 if s.name in state.excluded.columns and show:
                     own = state.excluded[s.name].to_numpy() & ~state.regime
                     spans = mask_spans(own, x)
                     if spans[0].size:
-                        IntervalShade(*spans, VARIABLE_COLOUR, alpha).attach(plot)
+                        shade = IntervalShade(*spans, VARIABLE_COLOUR, alpha)
+                        shade.attach(plot)
+                        self._overlay_items.append((plot, shade))
                     if self.view_flagged.isChecked():
                         pending = np.flatnonzero(state.pending[s.name].to_numpy())
                         self._markers(
@@ -486,6 +523,7 @@ class CleaningPage(StagePage):
             brush=QBrush(QColor(colour)),
         )
         plot.addItem(item, ignoreBounds=True)
+        self._overlay_items.append((plot, item))
 
     def _update_status(self) -> None:
         state = self._session.cleaning
@@ -520,14 +558,18 @@ class CleaningPage(StagePage):
             self._selection = (lo + 0.4 * span, lo + 0.6 * span)
             self._create_regions()
         else:
-            for plot, region in zip(self.trends.plots, self._regions, strict=False):
-                plot.removeItem(region)
+            for plot, region in self._regions:
+                if region.scene() is not None:
+                    plot.removeItem(region)
             self._regions = []
             self._selection = None
 
     def _create_regions(self) -> None:
         if self._selection is None:
             return
+        for plot, region in self._regions:
+            if region.scene() is not None:
+                plot.removeItem(region)
         self._regions = []
         for plot in self.trends.plots:
             region = pg.LinearRegionItem(
@@ -536,14 +578,14 @@ class CleaningPage(StagePage):
             region.setZValue(10)
             region.sigRegionChanged.connect(self._region_moved)
             plot.addItem(region, ignoreBounds=True)
-            self._regions.append(region)
+            self._regions.append((plot, region))
 
     def _region_moved(self, region: pg.LinearRegionItem) -> None:
         if self._syncing:
             return
         self._syncing = True
         self._selection = tuple(region.getRegion())
-        for other in self._regions:
+        for _plot, other in self._regions:
             if other is not region:
                 other.setRegion(self._selection)
         self._syncing = False

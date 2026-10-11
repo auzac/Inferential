@@ -92,7 +92,12 @@ def test_missing_and_non_zip_files(tmp_path):
 
 
 @pytest.mark.parametrize("name", ["../evil.json", "/abs.json", "dir\\x.json", "C:evil.json"])
-def test_unsafe_entry_names_rejected(tmp_path, name):
+def test_unsafe_entry_names_rejected(tmp_path, name, monkeypatch):
+    # zipfile's own sanitizer stores every entry name with "/" separators, so a raw
+    # backslash name cannot reach the reader through the public API. Disable the
+    # sanitizer here to simulate a naive zip implementation handing the application
+    # a hostile, spec-violating entry name — the case the check exists for.
+    monkeypatch.setattr(zipfile, "_sanitize_filename", lambda f: f)
     path = _write_zip(tmp_path / "x.imsproj", {"manifest.json": _manifest(), name: "{}"})
     with pytest.raises(ProjectFileError, match="unsafe entry"):
         load_project(path)

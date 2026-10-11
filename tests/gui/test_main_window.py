@@ -64,6 +64,50 @@ def test_new_project_uses_display_timezone_from_settings(window):
     assert window.session.project.display_timezone == "Asia/Singapore"
 
 
+def test_frequent_actions_live_on_menu_bar_not_toolbar(window):
+    from PySide6.QtWidgets import QToolBar, QToolButton
+
+    # One command row: the frequent actions sit on the menu bar's right end
+    # instead of a separate toolbar.
+    assert window.menuBar().findChildren(QToolBar) == []
+    corner = window.menuBar().cornerWidget()
+    buttons = corner.findChildren(QToolButton)
+    assert [b.defaultAction() for b in buttons] == [
+        window.act_new,
+        window.act_open,
+        window.act_save,
+        window.act_save_as,
+        window.act_import,
+        window.act_export,
+        window.act_undo,
+        window.act_redo,
+        window.act_settings,
+    ]
+
+
+def test_trend_hover_values_show_below_variable_list(qtbot, window, example_copy):
+    open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
+    window.sidebar.setCurrentRow(2)  # Cleaning & Exclusions
+    page = window.pages["cleaning"]
+    qtbot.waitUntil(lambda: bool(page.trends._series), timeout=10000)
+    frame = window.session.frames()[0]
+    for ts in frame.index:
+        if frame.loc[ts].notna().any():
+            t = ts.timestamp()
+            break
+    else:
+        pytest.fail("example data has no finite values")
+    # The readout sits below the variable list and is a static box: hovered text
+    # (however long) must never resize it or push the charts around.
+    assert page.cursor.parent() is not None
+    assert page.cursor.minimumHeight() == page.cursor.maximumHeight()
+    page.trends._show_cursor(t)
+    qtbot.wait(0)
+    assert "<b>" in page.cursor.time_label.text()
+    assert " = " in page.cursor.values_label.text()
+    assert page.cursor.height() == page.cursor.maximumHeight()
+
+
 def test_open_sample_project_loads_data_in_background(qtbot, window, example_copy):
     open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
     assert window.errors == []

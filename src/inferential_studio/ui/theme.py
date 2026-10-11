@@ -42,6 +42,24 @@ QListWidget#sidebar::item:selected:hover {
     color: #10335c;
 }
 
+/* Menu bar: frequent actions live on its right end (single command row). */
+QMenuBar QToolButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 3px;
+    padding: 3px 8px;
+    color: #1d2733;
+}
+
+QMenuBar QToolButton:hover { background-color: #e8edf3; }
+QMenuBar QToolButton:pressed { background-color: #d0e0f3; }
+QMenuBar QToolButton:disabled { color: #8a93a0; }
+
+QMenuBar QFrame#menuBarSeparator {
+    background-color: #d8dde4;
+    margin: 7px 6px;
+}
+
 QLabel#pageTitle {
     font-size: 16pt;
     font-weight: 600;

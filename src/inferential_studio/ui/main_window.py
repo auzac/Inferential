@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QDockWidget,
     QFileDialog,
+    QFrame,
+    QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -21,7 +23,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSplitter,
     QStackedWidget,
-    QToolBar,
+    QToolButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -57,6 +60,7 @@ class MainWindow(QMainWindow):
         self.settings = settings
         self.session = ProjectSession(self)
         self.tasks = TaskManager(self)
+        self.session.attach_tasks(self.tasks)  # exclusion masks recompute in the background
         self.undo_stack = QUndoStack(self)
         self.setMinimumSize(QSize(960, 640))
         self.resize(1280, 800)
@@ -159,18 +163,32 @@ class MainWindow(QMainWindow):
         tools_menu.addActions([self.act_settings, self.act_logs])
         help_menu = bar.addMenu("&Help")
         help_menu.addAction(self.act_about)
-        toolbar = QToolBar("Main", self)
-        toolbar.setObjectName("mainToolbar")
-        toolbar.setMovable(False)
-        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        toolbar.addActions([self.act_new, self.act_open, self.act_save, self.act_save_as])
-        toolbar.addSeparator()
-        toolbar.addActions([self.act_import, self.act_export])
-        toolbar.addSeparator()
-        toolbar.addActions([self.act_undo, self.act_redo])
-        toolbar.addSeparator()
-        toolbar.addAction(self.act_settings)
-        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
+        # Frequent actions sit on the right end of the menu bar itself, so the
+        # window keeps a single command row instead of a menu bar plus a toolbar.
+        corner = QWidget(bar)
+        layout = QHBoxLayout(corner)
+        layout.setContentsMargins(0, 0, 4, 0)
+        layout.setSpacing(0)
+        groups = [
+            [self.act_new, self.act_open, self.act_save, self.act_save_as],
+            [self.act_import, self.act_export],
+            [self.act_undo, self.act_redo],
+            [self.act_settings],
+        ]
+        for index, group in enumerate(groups):
+            for act in group:
+                button = QToolButton(corner)
+                button.setDefaultAction(act)
+                button.setAutoRaise(True)
+                button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+                layout.addWidget(button)
+            if index < len(groups) - 1:
+                separator = QFrame(corner)
+                separator.setObjectName("menuBarSeparator")
+                separator.setFrameShape(QFrame.Shape.NoFrame)
+                separator.setFixedWidth(1)
+                layout.addWidget(separator)
+        bar.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
     def _build_central(self) -> None:
         self.sidebar = QListWidget(self)
@@ -225,11 +243,19 @@ class MainWindow(QMainWindow):
         dock.setAllowedAreas(
             Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.LeftDockWidgetArea
         )
+        panel = QWidget(dock)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(8, 8, 8, 8)
+
+        # The hovered trend values live on the trend pages themselves, below the
+        # variable selection, so this dock stays a plain placeholder for now.
         placeholder = QLabel("Select a variable, rule or model to see its settings here.")
         placeholder.setWordWrap(True)
         placeholder.setAlignment(Qt.AlignmentFlag.AlignTop)
-        placeholder.setMargin(12)
-        dock.setWidget(placeholder)
+        placeholder.setMargin(4)
+        panel_layout.addWidget(placeholder, 1)
+
+        dock.setWidget(panel)
         dock.setMinimumWidth(220)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
         self.properties_dock = dock

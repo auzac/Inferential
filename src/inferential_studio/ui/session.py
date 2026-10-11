@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pandas as pd
 from PySide6.QtCore import QObject, Signal
@@ -13,6 +15,23 @@ from inferential_studio.core.exclusions import CleaningState, compute_cleaning
 from inferential_studio.core.persistence import load_project, rebase_source_paths, save_project
 from inferential_studio.core.quality import DetectorResult
 from inferential_studio.core.schemas import DataSource, Project, SourceKind, VariableMeta
+
+if TYPE_CHECKING:
+    from inferential_studio.infrastructure.workers import TaskManager
+
+log = logging.getLogger(__name__)
+
+
+def _compute_cleaning_task(
+    project: Project,
+    frame: pd.DataFrame,
+    text_mask: pd.DataFrame | None,
+    detector_results: dict[tuple[str, str], DetectorResult] | None,
+    target: pd.Series | None,
+    **_task_kwargs: object,
+) -> CleaningState:
+    """TaskManager entry point: compute_cleaning itself ignores progress/cancel."""
+    return compute_cleaning(project, frame, text_mask, detector_results, target)
 
 
 class ProjectSession(QObject):
@@ -37,6 +56,9 @@ class ProjectSession(QObject):
         self.detector_results: dict[tuple[str, str], DetectorResult] = {}
         self.detector_results_version = -1  # data version the results were computed for
         self.cleaning: CleaningState | None = None
+        self._tasks: TaskManager | None = None  # attached by the main window
+        self._cleaning_running = False
+        self._cleaning_serial = 0  # bumped on every recompute request; stale results are dropped
 
     # ------------------------------------------------------------------ state
 
@@ -126,16 +148,69 @@ class ProjectSession(QObject):
         self.detector_results_version = version
         self.recompute_cleaning()
 
+    def attach_tasks(self, tasks: TaskManager) -> None:
+        """Run cleaning recomputation in the background (set once by the main window)."""
+        self._tasks = tasks
+
     def recompute_cleaning(self) -> None:
-        frame, mask, target = self.frames()
+        """Recompute the exclusion masks. In the app this runs in the background and is
+        coalesced: a burst of edits produces one computation with the latest state."""
+        self._cleaning_serial += 1
+        frame, _mask, _target = self.frames()
         if frame.empty:
             self.cleaning = None
+            self.cleaning_changed.emit()
+            return
+        if self._tasks is None:
+            self._recompute_now()
         else:
-            results = (
-                self.detector_results if self.detector_results_version == self.data_version else {}
-            )
-            self.cleaning = compute_cleaning(self._project, frame, mask, results, target)
+            self._start_cleaning_task()
+
+    def _recompute_now(self) -> None:
+        frame, mask, target = self.frames()
+        results = self.detector_results if self.detector_results_version == self.data_version else {}
+        self.cleaning = compute_cleaning(self._project, frame, mask, results, target)
         self.cleaning_changed.emit()
+
+    def _start_cleaning_task(self) -> None:
+        if self._cleaning_running or self._tasks is None:
+            return  # the running task notices the newer serial and reruns
+        self._cleaning_running = True
+        serial = self._cleaning_serial
+        frame, mask, target = self.frames()
+        results = self.detector_results if self.detector_results_version == self.data_version else {}
+        self._tasks.submit(
+            "Recalculating exclusions",
+            _compute_cleaning_task,
+            self._project,
+            frame,
+            mask,
+            results,
+            target,
+            on_result=lambda state, s=serial: self._on_cleaning_done(state, s),
+            on_error=lambda msg, _details, s=serial: self._on_cleaning_failed(msg, s),
+            on_cancelled=lambda s=serial: self._on_cleaning_cancelled(s),
+        )
+
+    def _on_cleaning_done(self, state: CleaningState, serial: int) -> None:
+        self._cleaning_running = False
+        if serial != self._cleaning_serial:
+            self._start_cleaning_task()  # edits arrived while computing: run again
+            return
+        self.cleaning = state
+        self.cleaning_changed.emit()
+
+    def _on_cleaning_failed(self, message: str, serial: int) -> None:
+        self._cleaning_running = False
+        log.error("Exclusion recomputation failed: %s", message)
+        if serial != self._cleaning_serial:
+            self._start_cleaning_task()
+            return
+        self.cleaning_changed.emit()  # pages keep showing the previous state
+
+    def _on_cleaning_cancelled(self, serial: int) -> None:
+        self._cleaning_running = False
+        # No rerun: cancellation happens when the app is shutting down.
 
     # ------------------------------------------------------------------ data
 
@@ -233,6 +308,8 @@ class ProjectSession(QObject):
     def _bump_data(self) -> None:
         self.data_version += 1
         self.detector_results = {}
+        self._cleaning_serial += 1  # discard any in-flight cleaning computation
+        self.cleaning = None  # the old masks do not match the new data
         self.data_changed.emit()
         self.recompute_cleaning()
 

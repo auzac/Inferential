@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-from PySide6.QtCore import QRectF, Qt, Slot
+from PySide6.QtCore import QRectF, Qt, QTimer, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -32,6 +32,7 @@ from inferential_studio.infrastructure.workers import TaskManager
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
+from inferential_studio.ui.widgets.cursor_readout import CursorReadout
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.heatmap import CorrelationHeatmap
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem, to_epoch_seconds
@@ -108,28 +109,36 @@ class EdaPage(StagePage):
         self.show_target = QCheckBox("Show target (lab samples)")
         self.show_target.setChecked(True)
         self.show_target.toggled.connect(self._update_trends)
+        # Coalesce bursts of ticks: redraw once, a short pause after the last change.
+        self._selection_timer = QTimer(self)
+        self._selection_timer.setSingleShot(True)
+        self._selection_timer.setInterval(150)
+        self._selection_timer.timeout.connect(self._apply_selection)
+        self.cursor = CursorReadout()
         left = QWidget()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
         ll.addWidget(QLabel("Variables"))
         ll.addWidget(self.search)
-        ll.addWidget(self.var_list, 1)
+        ll.addWidget(self.var_list, 1)  # the list scrolls when there are many tags
         ll.addWidget(self.show_target)
+        ll.addWidget(self.cursor)
 
         # -- tabs -----------------------------------------------------------------------
         self.tabs = QTabWidget()
         self.trends = TrendView(session.project.display_timezone)
+        self.trends.hover.connect(self.cursor.show_hover)
         self.tabs.addTab(self.trends, "Trends")
 
         self.stats_table = DataTableView()
-        stats_tab = QWidget()
-        sl = QVBoxLayout(stats_tab)
+        self._stats_tab = QWidget()
+        sl = QVBoxLayout(self._stats_tab)
         note = QLabel(STATS_NOTE)
         note.setWordWrap(True)
         note.setObjectName("placeholderNote")
         sl.addWidget(self.stats_table, 1)
         sl.addWidget(note)
-        self.tabs.addTab(stats_tab, "Statistics")
+        self.tabs.addTab(self._stats_tab, "Statistics")
 
         self.method = QComboBox()
         self.method.addItem("Pearson (linear)", "pearson")
@@ -148,8 +157,8 @@ class EdaPage(StagePage):
         self.pair_plot.showGrid(x=True, y=True, alpha=0.15)
         self.pair_note = QLabel("Click a heatmap cell to see the scatter plot.")
         self.pair_note.setWordWrap(True)
-        corr_tab = QWidget()
-        cl = QVBoxLayout(corr_tab)
+        self._corr_tab = QWidget()
+        cl = QVBoxLayout(self._corr_tab)
         controls = QHBoxLayout()
         for w in (self.method, self.absolute, self.cluster, self.only_selected):
             controls.addWidget(w)
@@ -169,31 +178,31 @@ class EdaPage(StagePage):
         corr_note.setWordWrap(True)
         corr_note.setObjectName("placeholderNote")
         cl.addWidget(corr_note)
-        self.tabs.addTab(corr_tab, "Correlation")
+        self.tabs.addTab(self._corr_tab, "Correlation")
 
         self.matrix = pg.GraphicsLayoutWidget()
         self.matrix.setBackground("w")
         self.matrix_note = QLabel()
-        matrix_tab = QWidget()
-        ml = QVBoxLayout(matrix_tab)
+        self._matrix_tab = QWidget()
+        ml = QVBoxLayout(self._matrix_tab)
         ml.addWidget(self.matrix, 1)
         ml.addWidget(self.matrix_note)
-        self.tabs.addTab(matrix_tab, "Scatter matrix")
+        self.tabs.addTab(self._matrix_tab, "Scatter matrix")
 
         self.hist_var = QComboBox()
         self.hist_var.currentIndexChanged.connect(self._update_histogram)
         self.hist_plot = pg.PlotWidget(background="w")
         self.hist_plot.showGrid(x=True, y=True, alpha=0.15)
-        hist_tab = QWidget()
-        hl = QVBoxLayout(hist_tab)
+        self._hist_tab = QWidget()
+        hl = QVBoxLayout(self._hist_tab)
         hl.addWidget(self.hist_var)
         hl.addWidget(self.hist_plot, 1)
-        self.tabs.addTab(hist_tab, "Distribution")
+        self.tabs.addTab(self._hist_tab, "Distribution")
 
         self.coverage_canvas = pg.GraphicsLayoutWidget()
         self.coverage_canvas.setBackground("w")
-        cov_tab = QWidget()
-        cvl = QVBoxLayout(cov_tab)
+        self._cov_tab = QWidget()
+        cvl = QVBoxLayout(self._cov_tab)
         cvl.addWidget(self.coverage_canvas, 1)
         cov_note = QLabel(
             "Top: share of rows with a valid value per variable and time bin (green = complete, white = "
@@ -202,16 +211,26 @@ class EdaPage(StagePage):
         cov_note.setWordWrap(True)
         cov_note.setObjectName("placeholderNote")
         cvl.addWidget(cov_note)
-        self.tabs.addTab(cov_tab, "Coverage")
+        self.tabs.addTab(self._cov_tab, "Coverage")
 
         self.xy_table = DataTableView()
         self.xy_note = QLabel()
         self.xy_note.setWordWrap(True)
-        xy_tab = QWidget()
-        xl = QVBoxLayout(xy_tab)
+        self._xy_tab = QWidget()
+        xl = QVBoxLayout(self._xy_tab)
         xl.addWidget(self.xy_note)
         xl.addWidget(self.xy_table, 1)
-        self.tabs.addTab(xy_tab, "X–Y screening")
+        self.tabs.addTab(self._xy_tab, "X–Y screening")
+        # Each tab is refreshed only when it becomes visible (all of them once when
+        # the background statistics finish).
+        self._tab_updaters = {
+            self._stats_tab: self._update_stats,
+            self._corr_tab: self._update_correlation,
+            self._matrix_tab: self._update_matrix,
+            self._hist_tab: self._update_histogram,
+            self._cov_tab: self._update_coverage,
+            self._xy_tab: self._update_xy,
+        }
         self.tabs.currentChanged.connect(lambda _i: self._update_visible_tab())
 
         self.status = QLabel()
@@ -257,7 +276,7 @@ class EdaPage(StagePage):
             self.status.setText(
                 f"{len(self._frame):,} process rows × {self._frame.shape[1]} variables; {n_lab:,} target samples."
             )
-        self._update_trends()
+        self._update_trends(keep_range=False)  # new data: fit all
         if self.isVisible():
             self.ensure_computed()
 
@@ -345,22 +364,31 @@ class EdaPage(StagePage):
 
     @Slot()
     def _on_selection_changed(self, _item=None) -> None:  # noqa: ANN001
+        self._selection_timer.start()
+
+    def _apply_selection(self) -> None:
         self._update_trends()
-        if self.only_selected.isChecked():
+        # Only views that are actually on screen follow the ticks; the others are
+        # refreshed when their tab is opened (see _update_visible_tab).
+        current = self.tabs.currentWidget()
+        if current is self._corr_tab and self.only_selected.isChecked():
             self._update_correlation()
-        self._update_matrix()
+        if current is self._matrix_tab:
+            self._update_matrix()
 
     def _update_visible_tab(self, all_tabs: bool = False) -> None:
         if self._result is None:
             return
-        self._update_stats()
-        self._update_correlation()
-        self._update_matrix()
-        self._update_histogram()
-        self._update_coverage()
-        self._update_xy()
+        updaters = (
+            set(self._tab_updaters.values())
+            if all_tabs
+            else [self._tab_updaters.get(self.tabs.currentWidget())]
+        )
+        for updater in updaters:
+            if updater is not None:
+                updater()
 
-    def _update_trends(self) -> None:
+    def _update_trends(self, keep_range: bool = True) -> None:
         series = []
         for name in self.selected_variables():
             series.append(
@@ -379,7 +407,7 @@ class EdaPage(StagePage):
                     points=True,
                 )
             )
-        self.trends.set_series(series)
+        self.trends.set_series(series, keep_range=keep_range)
 
     def _update_stats(self) -> None:
         summary = self._result.summary.copy()

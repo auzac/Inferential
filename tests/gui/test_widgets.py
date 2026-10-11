@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem, format_time, to_epoch_seconds
-from inferential_studio.ui.widgets.trend_view import TrendSeries, TrendView
+from inferential_studio.ui.widgets.trend_view import BINS, MAX_PLOTS, TrendSeries, TrendView
 
 pytestmark = pytest.mark.gui
 
@@ -53,10 +53,59 @@ def test_trend_view_stacks_series_and_reads_cursor(qtbot):
     assert len(view.plots) == 3
     view.mode.setCurrentIndex(view.mode.findData("units"))
     assert len(view.plots) == 2  # A and B share degC
+    seen: list[tuple[str, dict]] = []
+    view.hover.connect(lambda t, values: seen.append((t, values)))
     view._show_cursor(float(x[10]) + 30)
-    text = view.readout.text()
-    assert "A = 10" in text and "B = 20" in text  # last value at or before the cursor
+    time_text, values = seen[-1]
+    assert values["A"] == "10 degC" and values["B"] == "20 degC"  # last value at or before cursor
+    assert time_text.startswith("2026-01-01 00:10")
     view._show_cursor(float(x[55]))
-    assert "A =" not in view.readout.text()  # inside the gap: no value invented
+    assert "A" not in seen[-1][1]  # inside the gap: no value invented
     view.set_series([])
     assert view.plots == [] and view.empty_label.isVisibleTo(view)
+
+
+def test_trend_view_updates_only_changed_plots(qtbot):
+    view = TrendView("UTC")
+    qtbot.addWidget(view)
+    x = to_epoch_seconds(pd.date_range("2026-01-01", periods=100, freq="1min", tz="UTC"))
+    view.set_series([TrendSeries("A", x, np.arange(100.0))])
+    plot_a = view.plots[0]
+    # Adding a series reuses the existing plot instead of rebuilding everything.
+    view.set_series(
+        [TrendSeries("A", x, np.arange(100.0)), TrendSeries("B", x, np.arange(100.0) * 2)]
+    )
+    assert len(view.plots) == 2 and view.plots[0] is plot_a
+    # Removing one keeps the other (with its zoom preserved by keep_range).
+    view.set_x_range(float(x[10]), float(x[20]))
+    view.set_series([TrendSeries("B", x, np.arange(100.0) * 2)], keep_range=True)
+    assert len(view.plots) == 1 and view.plots[0] is not plot_a
+    assert view.x_range() == (float(x[10]), float(x[20]))
+
+
+def test_trend_view_caps_plot_count(qtbot):
+    view = TrendView("UTC")
+    qtbot.addWidget(view)
+    x = to_epoch_seconds(pd.date_range("2026-01-01", periods=100, freq="1min", tz="UTC"))
+    view.set_series([TrendSeries(f"V{i}", x, np.arange(100.0)) for i in range(15)])
+    assert len(view.plots) == MAX_PLOTS == 12
+    assert "12 of 15" in view.limit_label.text() and view.limit_label.isVisibleTo(view)
+
+
+def test_trend_view_draws_envelope_then_raw_slice(qtbot):
+    view = TrendView("UTC")
+    qtbot.addWidget(view)
+    x = to_epoch_seconds(pd.date_range("2026-01-01", periods=10_000, freq="1s", tz="UTC"))
+    view.set_series([TrendSeries("A", x, np.arange(10_000.0))])
+    plot = view.plots[0]
+    lo_item, hi_item, _sig = view._items[view._plot_keys[0]]["A"]
+    # Zoomed out: the curves hold the precomputed min/max envelope, not the raw points.
+    assert len(lo_item.xData) == BINS == 2048
+    assert hi_item.isVisible()
+    # Zoomed in: the visible window is drawn from the raw samples.
+    view.set_x_range(float(x[100]), float(x[130]))
+    assert len(lo_item.xData) == 33  # 99..131, one point of slack on each side
+    assert not hi_item.isVisible()
+    # Zooming back out restores the envelope.
+    plot.setXRange(float(x[0]), float(x[-1]), padding=0)
+    assert len(lo_item.xData) == BINS and hi_item.isVisible()

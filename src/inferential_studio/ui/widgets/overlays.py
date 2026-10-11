@@ -7,6 +7,8 @@ pixel, so drawing cost depends on screen width, not on the number of exclusions.
 
 from __future__ import annotations
 
+import contextlib
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QRectF
@@ -41,6 +43,13 @@ class IntervalShade(pg.GraphicsObject):
         plot.addItem(self, ignoreBounds=True)
         self._vb = plot.vb
         plot.vb.sigRangeChanged.connect(self._range_changed)
+
+    def detach(self) -> None:
+        """Disconnect from the view box (the item itself is removed by its owner)."""
+        if self._vb is not None:
+            with contextlib.suppress(TypeError, RuntimeError):
+                self._vb.sigRangeChanged.disconnect(self._range_changed)
+            self._vb = None
 
     def _range_changed(self, *_args) -> None:
         self.prepareGeometryChange()
