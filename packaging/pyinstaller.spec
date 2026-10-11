@@ -21,6 +21,7 @@ datas = [
     (str(ROOT / "README.md"), "."),
     (str(ROOT / "CHANGELOG.md"), "."),
     (str(ROOT / "docs"), "docs"),
+    (str(ROOT / "assets" / "icons"), "assets/icons"),
     (str(ROOT / "examples" / "synthetic_distillation"), "examples/synthetic_distillation"),
 ]
 

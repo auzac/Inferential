@@ -47,6 +47,8 @@ where = ["src"]
 testpaths = ["tests"]
 qt_api = "pyside6"
 addopts = "-ra"
+# A test stuck for 5 minutes dumps every thread's stack (diagnoses hangs instead of silence).
+faulthandler_timeout = 300
 markers = [
     "gui: tests that create Qt widgets (run offscreen in CI)",
 ]

@@ -159,3 +159,18 @@ def test_exports(trained, tmp_path):
     assert pd.read_excel(xlsx, sheet_name="Data").shape[0] == len(fm.y)
     with pytest.raises(ExportError):
         write_table(shown, tmp_path / "p.txt")
+
+
+def test_results_summary_and_comparison(trained):
+    import json as _json
+
+    from inferential_studio.core.artifacts import compare_results, results_summary
+
+    _ds, _project, fm, run = trained
+    saved = _json.loads(_json.dumps(results_summary(run, test_revealed=False)))
+    assert compare_results(saved, run) == []
+    assert all(TEST not in m["metrics"] for m in saved["models"] if m["error"] is None)
+    saved["models"][0]["coefficients"] = {
+        k: v * 1.01 for k, v in saved["models"][0]["coefficients"].items()
+    }
+    assert any("coefficients differ" in d for d in compare_results(saved, run))

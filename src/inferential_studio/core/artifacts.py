@@ -477,3 +477,69 @@ def predict(
         )
     warnings.extend(fm.notes)
     return Prediction(table, warnings)
+
+
+# --------------------------------------------------------------------------- saved results
+
+
+def results_summary(run: TrainingRun, *, test_revealed: bool) -> dict[str, Any]:
+    """Compact JSON record of a training run, saved in the project to check reproduction."""
+    models = []
+    for m in run.models:
+        entry: dict[str, Any] = {"name": m.name, "kind": m.spec.kind.value, "error": m.error}
+        if m.ok:
+            shown = [s for s in SPLITS if s != TEST or test_revealed]
+            entry.update(
+                hyperparameters=dict(m.hyperparameters),
+                intercept=float(m.intercept),
+                coefficients={k: float(v) for k, v in m.coefficients.items()},
+                metrics={
+                    s: {k: (None if pd.isna(v) else float(v)) for k, v in m.metrics.loc[s].items()}
+                    for s in shown
+                },
+            )
+        models.append(entry)
+    return {
+        "saved_at": utc_now().isoformat(),
+        "app_version": __version__,
+        "libraries": dict(run.versions),
+        "test_revealed": test_revealed,
+        "features": list(run.features),
+        "split_counts": run.split.counts(),
+        "models": models,
+    }
+
+
+def compare_results(saved: dict[str, Any], run: TrainingRun, rtol: float = 1e-6) -> list[str]:
+    """Differences between saved results and a fresh run (empty list = reproduced)."""
+    diffs: list[str] = []
+    if saved.get("features") != list(run.features):
+        return ["The predictors differ from the saved run."]
+    if saved.get("split_counts") != run.split.counts():
+        diffs.append("The split assigns different numbers of samples.")
+    fresh = {m.name: m for m in run.models}
+    for entry in saved.get("models", []):
+        m = fresh.get(entry["name"])
+        if m is None:
+            diffs.append(
+                f"{entry['name']}: not in the new run (hyperparameters or models changed)."
+            )
+            continue
+        if (entry.get("error") is None) != m.ok:
+            diffs.append(f"{entry['name']}: trained in one run but not the other.")
+            continue
+        if not m.ok:
+            continue
+        a = np.array([entry["intercept"], *entry["coefficients"].values()])
+        b = np.array([m.intercept, *m.coefficients.to_numpy()])
+        if not np.allclose(a, b, rtol=rtol, atol=1e-12):
+            diffs.append(f"{entry['name']}: coefficients differ.")
+        for split, values in entry.get("metrics", {}).items():
+            for key, v in values.items():
+                w = m.metrics.loc[split, key]
+                if (v is None) != pd.isna(w) or (
+                    v is not None and not np.isclose(v, w, rtol=rtol, atol=1e-12)
+                ):
+                    diffs.append(f"{entry['name']}: {split} {key} differs ({v} vs {w}).")
+                    break
+    return diffs

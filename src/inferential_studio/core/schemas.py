@@ -28,8 +28,9 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SCHEMA_VERSION = 4  # 1 = M0; 2 = native timestamps, duplicate policy, sample ids;
-# 3 = rules, detectors, flag reviews; 4 = alignment options, splits and model configurations
+SCHEMA_VERSION = 5  # 1 = M0; 2 = native timestamps, duplicate policy, sample ids;
+# 3 = rules, detectors, flag reviews; 4 = alignment options, splits and model configurations;
+# 5 = optional embedded data (portable projects), saved training results, report details
 
 
 class SchemaError(ValueError):
@@ -787,6 +788,17 @@ class ModellingConfig:
         return next((m for m in self.models if m.kind is kind), None)
 
 
+@dataclass(frozen=True)
+class ReportInfo:
+    """Model-card details entered by the user (Export & Report page)."""
+
+    title: str = ""
+    model_version: str = "1.0"
+    owner: str = ""
+    purpose: str = ""
+    limitations: str = ""
+
+
 # --------------------------------------------------------------------------- project
 
 
@@ -805,6 +817,7 @@ class Project:
     flag_decisions: list[FlagDecision] = field(default_factory=list)
     alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
     modelling: ModellingConfig = field(default_factory=ModellingConfig)
+    report: ReportInfo = field(default_factory=ReportInfo)
     notes: str = ""
     created_at: datetime = field(default_factory=utc_now)
     modified_at: datetime = field(default_factory=utc_now)

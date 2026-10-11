@@ -9,8 +9,8 @@ from PySide6.QtWidgets import QMessageBox
 from inferential_studio.infrastructure.settings import AppSettings
 from inferential_studio.ui.main_window import MainWindow
 from inferential_studio.ui.pages.eda_page import EdaPage
+from inferential_studio.ui.pages.export_page import ExportPage
 from inferential_studio.ui.pages.import_page import ImportPage
-from inferential_studio.ui.pages.stage_page import PlaceholderPage
 from inferential_studio.ui.stages import STAGES
 
 EXAMPLE_DIR = Path(__file__).resolve().parents[2] / "examples" / "synthetic_distillation"
@@ -54,7 +54,8 @@ def test_shell_has_nine_stages_and_navigation(window):
     assert isinstance(window.stack.currentWidget(), EdaPage)
     window.sidebar.setCurrentRow(8)
     page = window.stack.currentWidget()
-    assert isinstance(page, PlaceholderPage) and page.stage.key == "export"
+    assert isinstance(page, ExportPage) and page.stage.key == "export"
+    assert not page.btn_report.isEnabled()  # nothing trained yet
     assert window.windowTitle().startswith("Untitled project")
     assert window.act_import.isEnabled()
     assert window.lbl_records.text() == "Process records: —"

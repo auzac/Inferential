@@ -59,12 +59,21 @@ def main(argv: list[str] | None = None) -> int:
     from inferential_studio.ui.theme import apply_theme
 
     apply_theme(app)
+    from PySide6.QtGui import QIcon
+
+    from inferential_studio.infrastructure.paths import resource_path
+
+    icon = resource_path("assets/icons/app.png")
+    if icon.is_file():
+        app.setWindowIcon(QIcon(str(icon)))
     window = MainWindow(settings)
     window.show()
 
     if args.project:
         window.open_project_file(args.project)
 
+    if not args.smoke_test:
+        QTimer.singleShot(0, window.offer_recovery)  # after the window is on screen
     if args.smoke_test:
         _numeric_self_check()
         log.info("Smoke test: main window created; exiting")
