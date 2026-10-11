@@ -14,9 +14,9 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPushButton,
     QSplitter,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -33,12 +33,15 @@ from inferential_studio.ui.messages import Level
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
+from inferential_studio.ui.widgets.chart_menu import add_plot
 from inferential_studio.ui.widgets.cursor_readout import CursorReadout
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.heatmap import CorrelationHeatmap
+from inferential_studio.ui.widgets.plots import clear_placeholder, plot_widget, show_placeholder
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem, to_epoch_seconds
 from inferential_studio.ui.widgets.trend_view import PALETTE, TrendSeries, TrendView
 
+COVERAGE_FULL = (63, 143, 107)  # muted green for 100 % valid (white = none)
 SCATTER_DISPLAY_MAX = 20_000  # points drawn in scatter plots; statistics always use all data
 MATRIX_MAX = 6
 DEFAULT_SELECTED = 4
@@ -69,8 +72,8 @@ STATS_NOTE = (
 )
 CORR_NOTE = (
     "Pairwise correlation on raw, uncleaned data. It shows association, not causation, and can be "
-    "dominated by shutdowns or operating-regime changes. Hover a cell for r and the number of pairs; "
-    "click it for a scatter plot."
+    "dominated by shutdowns or operating-regime changes. The matrix follows the variables checked "
+    "on the left. Hover a cell for r and the number of pairs; click it for a scatter plot."
 )
 
 
@@ -116,10 +119,29 @@ class EdaPage(StagePage):
         self._selection_timer.setInterval(150)
         self._selection_timer.timeout.connect(self._apply_selection)
         self.cursor = CursorReadout()
+        self.check_all = QToolButton()
+        self.check_all.setText("All")
+        self.check_all.setToolTip("Check every listed variable (respects the filter)")
+        self.check_all.clicked.connect(lambda: self._check_listed(True))
+        self.check_none = QToolButton()
+        self.check_none.setText("None")
+        self.check_none.setToolTip("Uncheck every listed variable (respects the filter)")
+        self.check_none.clicked.connect(lambda: self._check_listed(False))
+        self.count_label = QLabel()
+        self.count_label.setObjectName("placeholderNote")
+        head = QHBoxLayout()
+        head.setSpacing(4)
+        title = QLabel("Variables")
+        title.setObjectName("sectionTitle")
+        head.addWidget(title)
+        head.addWidget(self.count_label)
+        head.addStretch(1)
+        head.addWidget(self.check_all)
+        head.addWidget(self.check_none)
         left = QWidget()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
-        ll.addWidget(QLabel("Variables"))
+        ll.addLayout(head)
         ll.addWidget(self.search)
         ll.addWidget(self.var_list, 1)  # the list scrolls when there are many tags
         ll.addWidget(self.show_target)
@@ -149,23 +171,25 @@ class EdaPage(StagePage):
         self.absolute = QCheckBox("Absolute |r|")
         self.cluster = QCheckBox("Group similar variables")
         self.cluster.setToolTip("Hierarchical ordering on 1 − |r| (average linkage)")
-        self.only_selected = QCheckBox("Only checked variables")
-        for w in (self.method,):
-            w.currentIndexChanged.connect(self._update_correlation)
-        for w in (self.absolute, self.cluster, self.only_selected):
+        self.method.currentIndexChanged.connect(self._update_correlation)
+        for w in (self.absolute, self.cluster):
             w.toggled.connect(self._update_correlation)
+        self.corr_scope = QLabel()
+        self.corr_scope.setObjectName("placeholderNote")
         self.heatmap = CorrelationHeatmap()
         self.heatmap.cell_clicked.connect(self._show_pair)
-        self.pair_plot = pg.PlotWidget(background="w")
-        self.pair_plot.showGrid(x=True, y=True, alpha=0.15)
-        self.pair_note = QLabel("Click a heatmap cell to see the scatter plot.")
+        self.pair_plot = plot_widget(name="scatter")
+        self.pair_note = QLabel()
         self.pair_note.setWordWrap(True)
+        self._pair: tuple[str, str] | None = None
+        self._pair_placeholder()
         self._corr_tab = QWidget()
         cl = QVBoxLayout(self._corr_tab)
         controls = QHBoxLayout()
-        for w in (self.method, self.absolute, self.cluster, self.only_selected):
+        for w in (self.method, self.absolute, self.cluster):
             controls.addWidget(w)
         controls.addStretch(1)
+        controls.addWidget(self.corr_scope)
         cl.addLayout(controls)
         split = QSplitter(Qt.Orientation.Horizontal)
         split.addWidget(self.heatmap)
@@ -185,6 +209,7 @@ class EdaPage(StagePage):
 
         self.matrix = pg.GraphicsLayoutWidget()
         self.matrix.setBackground("w")
+        self.matrix.setProperty("chartName", "scatter_matrix")
         self.matrix_note = QLabel()
         self._matrix_tab = QWidget()
         ml = QVBoxLayout(self._matrix_tab)
@@ -194,8 +219,7 @@ class EdaPage(StagePage):
 
         self.hist_var = QComboBox()
         self.hist_var.currentIndexChanged.connect(self._update_histogram)
-        self.hist_plot = pg.PlotWidget(background="w")
-        self.hist_plot.showGrid(x=True, y=True, alpha=0.15)
+        self.hist_plot = plot_widget(name="distribution")
         self._hist_tab = QWidget()
         hl = QVBoxLayout(self._hist_tab)
         hl.addWidget(self.hist_var)
@@ -204,6 +228,7 @@ class EdaPage(StagePage):
 
         self.coverage_canvas = pg.GraphicsLayoutWidget()
         self.coverage_canvas.setBackground("w")
+        self.coverage_canvas.setProperty("chartName", "coverage")
         self._cov_tab = QWidget()
         cvl = QVBoxLayout(self._cov_tab)
         cvl.addWidget(self.coverage_canvas, 1)
@@ -235,11 +260,6 @@ class EdaPage(StagePage):
             self._xy_tab: self._update_xy,
         }
         self.tabs.currentChanged.connect(lambda _i: self._update_visible_tab())
-
-        self.recalc = QPushButton("Recalculate")
-        self.recalc.setToolTip("Recalculate the statistics")
-        self.recalc.clicked.connect(self.ensure_computed)
-        self.tabs.setCornerWidget(self.recalc, Qt.Corner.TopRightCorner)
 
         main = QSplitter(Qt.Orientation.Horizontal)
         main.addWidget(left)
@@ -306,6 +326,7 @@ class EdaPage(StagePage):
                 item.setToolTip("Not currently a candidate predictor")
             self.var_list.addItem(item)
         self.var_list.blockSignals(False)
+        self._update_count()
         self.hist_var.blockSignals(True)
         self.hist_var.clear()
         self.hist_var.addItems(
@@ -374,14 +395,29 @@ class EdaPage(StagePage):
         self._selection_timer.start()
 
     def _apply_selection(self) -> None:
+        self._update_count()
         self._update_trends()
         # Only views that are actually on screen follow the ticks; the others are
         # refreshed when their tab is opened (see _update_visible_tab).
         current = self.tabs.currentWidget()
-        if current is self._corr_tab and self.only_selected.isChecked():
+        if current is self._corr_tab:
             self._update_correlation()
         if current is self._matrix_tab:
             self._update_matrix()
+
+    def _check_listed(self, checked: bool) -> None:
+        """Check or uncheck every variable the filter leaves visible (one redraw)."""
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        self.var_list.blockSignals(True)
+        for i in range(self.var_list.count()):
+            item = self.var_list.item(i)
+            if not item.isHidden():
+                item.setCheckState(state)
+        self.var_list.blockSignals(False)
+        self._on_selection_changed()
+
+    def _update_count(self) -> None:
+        self.count_label.setText(f"{len(self.selected_variables())} of {self.var_list.count()}")
 
     def _update_visible_tab(self, all_tabs: bool = False) -> None:
         if self._result is None:
@@ -430,27 +466,43 @@ class EdaPage(StagePage):
             else self._result.spearman
         )
         pairs = self._result.pairs
-        if self.only_selected.isChecked():
-            keep = [n for n in self.selected_variables() if n in corr.columns]
-            corr, pairs = corr.loc[keep, keep], pairs.loc[keep, keep]
+        keep = [n for n in self.selected_variables() if n in corr.columns]
+        self.corr_scope.setText(f"{len(keep)} checked variable{'s' if len(keep) != 1 else ''}")
+        if self._pair is not None and not set(self._pair) <= set(keep):
+            self._pair_placeholder()  # the pair shown is no longer in the matrix
+        if len(keep) < 2:
+            self.heatmap.set_placeholder("Check at least two variables on the left.")
+            return
+        corr, pairs = corr.loc[keep, keep], pairs.loc[keep, keep]
         if self.cluster.isChecked() and len(corr) > 2:
             order = hierarchical_order(corr)
             corr, pairs = corr.loc[order, order], pairs.loc[order, order]
         self.heatmap.set_matrix(corr, pairs, absolute=self.absolute.isChecked())
+
+    def _pair_placeholder(
+        self, text: str = "Click a cell of the matrix to see its scatter plot."
+    ) -> None:
+        self._pair = None
+        for side in ("left", "bottom"):
+            self.pair_plot.setLabel(side, "")
+        show_placeholder(self.pair_plot, text)
+        self.pair_note.setText("")
 
     @Slot(str, str)
     def _show_pair(self, row_var: str, col_var: str) -> None:
         self.pair_plot.clear()
         if row_var not in self._frame or col_var not in self._frame:
             return
+        clear_placeholder(self.pair_plot)
         pair = (
             self._frame[[col_var, row_var]].dropna()
             if row_var != col_var
             else self._frame[[col_var]].dropna()
         )
         if row_var == col_var or pair.empty:
-            self.pair_note.setText(f"{row_var}: choose a cell off the diagonal.")
+            self._pair_placeholder(f"{row_var}: choose a cell off the diagonal.")
             return
+        self._pair = (row_var, col_var)
         idx = _subsample(len(pair), SCATTER_DISPLAY_MAX)
         sub = pair.iloc[idx]
         self.pair_plot.plot(
@@ -479,8 +531,7 @@ class EdaPage(StagePage):
         sub = sub.iloc[idx]
         for i, yname in enumerate(names):
             for j, xname in enumerate(names):
-                p = self.matrix.addPlot(row=i, col=j)
-                p.hideButtons()
+                p = add_plot(self.matrix, row=i, col=j)
                 p.getAxis("left").setStyle(showValues=j == 0)
                 p.getAxis("bottom").setStyle(showValues=i == len(names) - 1)
                 if j == 0:
@@ -540,25 +591,29 @@ class EdaPage(StagePage):
         n_vars, n_bins = frac.shape
         rgb = np.empty((n_vars, n_bins, 3), dtype=np.uint8)
         f = np.nan_to_num(frac, nan=0.0)
-        rgb[..., 0] = (255 - f * (255 - 0)).astype(np.uint8)
-        rgb[..., 1] = (255 - f * (255 - 158)).astype(np.uint8)
-        rgb[..., 2] = (255 - f * (255 - 115)).astype(np.uint8)
+        for channel, full in enumerate(COVERAGE_FULL):  # white (no data) → green (complete)
+            rgb[..., channel] = (255 - f * (255 - full)).astype(np.uint8)
         rgb[np.isnan(frac)] = (200, 200, 200)
         x0 = to_epoch_seconds(pd.DatetimeIndex([cov.bin_starts[0]]))[0]
         width = cov.bin_width.total_seconds() * n_bins
         tz = self._session.project.display_timezone
-        top = self.coverage_canvas.addPlot(row=0, col=0, axisItems={"bottom": TzDateAxisItem(tz)})
-        img = pg.ImageItem(rgb.transpose(1, 0, 2))
+        top = add_plot(self.coverage_canvas, row=0, col=0, axisItems={"bottom": TzDateAxisItem(tz)})
+        img = pg.ImageItem(rgb.transpose(1, 0, 2), levels=(0, 255))  # true colours, no stretch
         img.setRect(QRectF(x0, 0, width, n_vars))
         top.addItem(img)
         top.invertY(True)
         names = list(cov.valid_fraction.columns)
         top.getAxis("left").setTicks([[(i + 0.5, n) for i, n in enumerate(names)]])
-        bottom = self.coverage_canvas.addPlot(
-            row=1, col=0, axisItems={"bottom": TzDateAxisItem(tz)}
+        top.getAxis("bottom").setStyle(showValues=False)  # the time labels sit under the rows chart
+        bottom = add_plot(
+            self.coverage_canvas, row=1, col=0, axisItems={"bottom": TzDateAxisItem(tz)}
         )
+        # Same left-axis width on both charts so their time axes line up.
+        axis_width = 60 + 6 * max((len(n) for n in names), default=0)
+        for plot in (top, bottom):
+            plot.getAxis("left").setWidth(axis_width)
         centres = x0 + (np.arange(n_bins) + 0.5) * cov.bin_width.total_seconds()
-        bottom.plot(centres, cov.rows, pen=pg.mkPen(PALETTE[0]), stepMode=None)
+        bottom.plot(centres, cov.rows, pen=pg.mkPen(PALETTE[0], width=1.5), stepMode=None)
         bottom.setLabel("left", "Rows / bin")
         bottom.setYRange(0, max(float(cov.rows.max()), 1.0) * 1.1, padding=0)
         bottom.setXLink(top)

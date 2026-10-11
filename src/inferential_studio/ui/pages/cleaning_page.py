@@ -57,7 +57,7 @@ from inferential_studio.ui.messages import Level
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
-from inferential_studio.ui.theme import mark_primary
+from inferential_studio.ui.theme import mark_primary, theme_colour, tinted
 from inferential_studio.ui.widgets.cursor_readout import CursorReadout
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.overlays import IntervalShade, mask_spans
@@ -182,7 +182,7 @@ class CleaningPage(StagePage):
         top = QSplitter(Qt.Orientation.Horizontal)
         top.addWidget(left)
         top.addWidget(self.trends)
-        top.setSizes([200, 900])
+        top.setSizes([230, 870])
 
         # -- tabs -------------------------------------------------------------------
         self.tabs = QTabWidget()
@@ -196,7 +196,7 @@ class CleaningPage(StagePage):
         split = QSplitter(Qt.Orientation.Vertical)
         split.addWidget(top)
         split.addWidget(self.tabs)
-        split.setSizes([480, 320])
+        split.setSizes([560, 260])
         self.body.addLayout(bar)
         self.body.addWidget(split, 1)
 
@@ -714,7 +714,7 @@ class CleaningPage(StagePage):
         try:
             hit = evaluate_rule(rule, frame, mask)
         except (RuleError, ValueError) as exc:
-            return f"<span style='color:#b00020'>{exc}</span>"
+            return tinted(str(exc))
         state = self._session.cleaning
         step_h = state.median_interval.total_seconds() / 3600 if state is not None else 0
         return f"Matches {int(hit.sum()):,} of {len(frame):,} rows (≈ {hit.sum() * step_h:.1f} h)."
@@ -741,7 +741,7 @@ class CleaningPage(StagePage):
                 _item(matched),
             ]
             if rule.rule_id in errors:
-                cells[-1].setForeground(QColor("#b00020"))
+                cells[-1].setForeground(theme_colour("error"))
             for c, cell in enumerate(cells):
                 t.setItem(r, c, cell)
         t.blockSignals(False)

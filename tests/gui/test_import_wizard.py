@@ -131,11 +131,10 @@ def test_import_through_main_window(qtbot, ambiguous_csv, tmp_path):
     window.session._set_dirty(False)
 
 
-def test_lab_wizard_has_result_time_and_target_default(qtbot, tmp_path):
+def test_lab_wizard_has_one_timestamp_sample_id_and_target_default(qtbot, tmp_path):
     lab = pd.DataFrame(
         {
             "Sampled": pd.to_datetime(["2026-03-13 08:00", "2026-03-13 10:00"]),
-            "Reported": pd.to_datetime(["2026-03-13 09:10", "2026-03-13 11:05"]),
             "Purity": [0.985, 0.987],
             "LIMS id": ["A1", "A2"],
         }
@@ -147,42 +146,53 @@ def test_lab_wizard_has_result_time_and_target_default(qtbot, tmp_path):
     wizard.file_page.path_edit.setText(str(path))
     walk_to(wizard, wizard.time_page)
     tp = wizard.time_page
-    assert tp.result.isVisible()  # lab extras are always offered now
-    tp.result.column.setCurrentText("Reported")
+    # One timestamp per source: no separate result-available time any more.
+    assert not hasattr(tp, "result")
+    assert tp.time.selected_column == "Sampled"
     tp.sample_id.setCurrentText("LIMS id")
     assert tp.isComplete()
     walk_to(wizard, wizard.finish_page)
     plan = wizard.plan()
     assert plan.source.kind is SourceKind.LAB
-    assert plan.source.result_timestamp.column == "Reported"
+    assert plan.source.result_timestamp is None
     assert plan.source.sample_id_column == "LIMS id"
     assert [(v.name, v.role) for v in plan.variables] == [("Purity", VariableRole.TARGET)]
     assert plan.source.duplicate_policy is DuplicatePolicy.KEEP_ALL
 
 
-def test_resolve_kind_rules():
-    spec = TimestampSpec(column="T", kind=TimestampKind.TEXT)
+def test_sample_id_cannot_be_the_time_column(qtbot, tmp_path):
+    path = tmp_path / "lab.csv"
+    pd.DataFrame(
+        {"Sampled": pd.to_datetime(["2026-03-13 08:00", "2026-03-13 10:00"]), "Purity": [1, 2]}
+    ).to_csv(path, index=False)
+    wizard = ImportWizard(Project(), "UTC", source_id="lab")
+    qtbot.addWidget(wizard)
+    wizard.file_page.path_edit.setText(str(path))
+    walk_to(wizard, wizard.time_page)
+    wizard.time_page.sample_id.setCurrentText("Sampled")
+    assert not wizard.time_page.validatePage()
+    assert "cannot also be the time column" in wizard.time_page.status.text()
 
+
+def test_resolve_kind_rules():
     def variables(*roles: VariableRole) -> list[VariableMeta]:
         return [
             VariableMeta(name=f"V{i}", source_id="s", source_column=f"V{i}", role=role)
             for i, role in enumerate(roles)
         ]
 
-    # Lab markers (result time / sample id) always mean lab data.
-    assert resolve_kind(spec, None, variables()) is SourceKind.LAB
-    assert resolve_kind(None, "ID", variables()) is SourceKind.LAB
-    assert resolve_kind(spec, None, variables(VariableRole.PREDICTOR)) is SourceKind.LAB
-    # Without markers: target-only is a sparse lab file; anything else is process.
-    assert resolve_kind(None, None, variables(VariableRole.TARGET)) is SourceKind.LAB
+    # A sample ID column always means lab data.
+    assert resolve_kind("ID", variables()) is SourceKind.LAB
+    assert resolve_kind("ID", variables(VariableRole.TARGET)) is SourceKind.LAB
+    assert resolve_kind("ID", variables(VariableRole.PREDICTOR)) is SourceKind.LAB
+    # Without one: target-only is a sparse lab file; anything else is process.
+    assert resolve_kind(None, variables(VariableRole.TARGET)) is SourceKind.LAB
     assert (
-        resolve_kind(
-            None, None, variables(VariableRole.TARGET, VariableRole.PREDICTOR)
-        )
+        resolve_kind(None, variables(VariableRole.TARGET, VariableRole.PREDICTOR))
         is SourceKind.PROCESS
     )
-    assert resolve_kind(None, None, variables(VariableRole.PREDICTOR)) is SourceKind.PROCESS
-    assert resolve_kind(None, None, variables()) is SourceKind.PROCESS
+    assert resolve_kind(None, variables(VariableRole.PREDICTOR)) is SourceKind.PROCESS
+    assert resolve_kind(None, variables()) is SourceKind.PROCESS
 
 
 def test_combined_csv_target_and_predictors_resolves_process(qtbot, tmp_path):
@@ -228,12 +238,12 @@ def test_target_only_file_resolves_lab(qtbot, tmp_path):
     assert plan.source.duplicate_policy is DuplicatePolicy.KEEP_ALL
 
 
-def test_result_time_marker_resolves_lab(qtbot, tmp_path):
+def test_sample_id_marker_resolves_lab(qtbot, tmp_path):
     path = tmp_path / "analyzer.csv"
     pd.DataFrame(
         {
             "Sampled": pd.to_datetime(["2026-03-13 08:00", "2026-03-13 10:00"]),
-            "Reported": pd.to_datetime(["2026-03-13 09:10", "2026-03-13 11:05"]),
+            "Sample": ["S1", "S2"],
             "Purity": [0.985, 0.987],
         }
     ).to_csv(path, index=False)
@@ -241,11 +251,11 @@ def test_result_time_marker_resolves_lab(qtbot, tmp_path):
     qtbot.addWidget(wizard)
     wizard.file_page.path_edit.setText(str(path))
     walk_to(wizard, wizard.time_page)
-    wizard.time_page.result.column.setCurrentText("Reported")
+    wizard.time_page.sample_id.setCurrentText("Sample")
     walk_to(wizard, wizard.finish_page)
     plan = wizard.plan()
     assert plan.source.kind is SourceKind.LAB
-    assert plan.source.result_timestamp.column == "Reported"
+    assert plan.source.sample_id_column == "Sample"
     assert [v.role for v in plan.variables] == [VariableRole.TARGET]  # lab default
 
 
@@ -254,7 +264,7 @@ def test_lab_source_with_predictors_is_blocked(qtbot, tmp_path):
     pd.DataFrame(
         {
             "Sampled": pd.to_datetime(["2026-03-13 08:00", "2026-03-13 10:00"]),
-            "Reported": pd.to_datetime(["2026-03-13 09:10", "2026-03-13 11:05"]),
+            "Sample": ["S1", "S2"],
             "V1": [1.0, 2.0],
             "V2": [3.0, 4.0],
         }
@@ -263,13 +273,14 @@ def test_lab_source_with_predictors_is_blocked(qtbot, tmp_path):
     qtbot.addWidget(wizard)
     wizard.file_page.path_edit.setText(str(path))
     walk_to(wizard, wizard.time_page)
-    wizard.time_page.result.column.setCurrentText("Reported")
+    wizard.time_page.sample_id.setCurrentText("Sample")
     walk_to(wizard, wizard.finish_page)
     fp = wizard.finish_page
     assert fp.isComplete()  # V1 defaults to TARGET, V2 is not used
     set_role(wizard, "V2", VariableRole.PREDICTOR)
     assert not fp.isComplete()
     assert "Predictor columns must come from process data" in fp.error.text()
+    assert "sample ID column" in fp.error.text()
     set_role(wizard, "V2", VariableRole.UNUSED)
     assert fp.isComplete()
 

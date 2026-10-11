@@ -10,8 +10,15 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyMod
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHeaderView, QTableView, QWidget
 
+NUMERIC_ZERO = 1e-14  # smaller magnitudes are floating-point residue (e.g. an OLS bias)
+GROUP_FROM = 10_000  # thousands separators from five digits up (years and ids stay plain)
+
 
 def format_value(value: object) -> str:
+    """Display text for one table cell: five significant digits, plain zeros, grouped counts.
+
+    Formatting is for reading only; sorting uses the raw value and exports use full precision.
+    """
     if (
         value is None
         or (isinstance(value, float) and math.isnan(value))
@@ -19,13 +26,24 @@ def format_value(value: object) -> str:
         or value is pd.NaT
     ):
         return ""
+    if isinstance(value, (bool, np.bool_)):
+        return "Yes" if value else "No"
+    if isinstance(value, (int, np.integer)):
+        return f"{int(value):,}" if abs(int(value)) >= GROUP_FROM else str(int(value))
     if isinstance(value, (float, np.floating)):
         v = float(value)
-        if v == 0:
+        if math.isinf(v):
+            return "∞" if v > 0 else "−∞"
+        a = abs(v)
+        if a < NUMERIC_ZERO:
             return "0"
-        if abs(v) >= 1e6 or abs(v) < 1e-3:
-            return f"{v:.4g}"
-        return f"{v:.6g}"
+        if v.is_integer() and a < 1e15:
+            return f"{int(v):,}" if a >= GROUP_FROM else str(int(v))
+        if a >= 1e5:
+            return f"{v:,.0f}" if a < 1e12 else f"{v:.4e}"
+        if a < 1e-4:
+            return f"{v:.3e}"
+        return f"{v:.5g}"
     return str(value)
 
 

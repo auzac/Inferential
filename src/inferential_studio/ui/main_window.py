@@ -170,6 +170,12 @@ class MainWindow(QMainWindow):
             "Open &Log Folder", self._open_log_folder, None, "Show the application log files"
         )
         self.act_about = action(f"&About {APP_NAME}", self._about)
+        self.act_example = action(
+            "Generate &Example Dataset…",
+            lambda: self._generate_example_dialog(),
+            None,
+            "Create an artificial distillation dataset and a matching sample project",
+        )
         self.act_guide = action(
             "&User Guide",
             self.show_guide,
@@ -201,6 +207,7 @@ class MainWindow(QMainWindow):
         tools_menu.addActions([self.act_settings, self.act_logs])
         help_menu = bar.addMenu("&Help")
         help_menu.addAction(self.act_guide)
+        help_menu.addAction(self.act_example)
         help_menu.addSeparator()
         help_menu.addAction(self.act_about)
         self.help_menu = help_menu
@@ -510,7 +517,8 @@ class MainWindow(QMainWindow):
         source_id = (
             initial.source.source_id
             if initial
-            else self.session.new_source_id(SourceKind.PROCESS)  # provisional; kind is resolved later
+            # Provisional id: the kind is resolved from the wizard's choices (see _fit_plan_id).
+            else self.session.new_source_id(SourceKind.PROCESS)
         )
         wizard = ImportWizard(
             self.session.project,

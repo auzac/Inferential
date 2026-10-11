@@ -3,6 +3,38 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## v0.5.3 — Exploration and polish (2026-10-12)
+
+### Changed
+- Import wizard: **one timestamp per file**. The separate *result available time* is no longer
+  asked for; lab files use the sample time. The optional **Sample ID column** now sits next to
+  the source timezone and still marks a file as lab data. (Projects that already record a result
+  time keep it, for audit only.)
+- Initial EDA: the **correlation matrix follows the ticked variables** and updates as you tick or
+  untick (the *Only checked variables* box is gone). **All / None** buttons and a ticked count sit
+  above the variable list. The **Recalculate** button is removed — statistics recompute on their
+  own when data changes.
+- Trends (Initial EDA, Cleaning): **drag across a chart to zoom to that period**; a new **Back**
+  button steps out and **Fit all** shows everything. Navigation is along time only and each
+  y-axis fits the data on screen.
+- **One right-click menu for every chart** (trends, EDA, modelling, validation, export):
+  **Copy image** and **Save image…**, acting on the whole chart as shown. PyQtGraph's own menu
+  (*View All*, axis and mouse-mode options, export dialog) and its small "A" auto-range button
+  are gone everywhere.
+- Tables show numbers to five significant figures, floating-point residue (e.g. an OLS training
+  bias of 1e-17) as 0, counts with thousands separators and Yes/No for flags.
+- Data Import: the source details are a labelled summary; OK sources and reports show a green
+  check. The example-data box only appears for an empty project; **Help → Generate Example
+  Dataset…** is always available.
+- Signal Processing: the settings form runs the full height on the right, giving the preview
+  charts most of the page. Cleaning gives the trend charts more room.
+- Coverage chart: calmer green (colours were being stretched), time axes of both charts line up.
+- Empty charts (EDA scatter, batch prediction) show a short message instead of bare axes.
+- Inline validation text uses the theme's error / warning colours throughout.
+- Example dataset: the lab file has a single timestamp (`Sample_Timestamp`) and the sample
+  project no longer records a result time. Process data, lab values and ground truth are
+  unchanged.
+
 ## v0.5.2 — Single data import flow (2026-10-12)
 
 ### Changed

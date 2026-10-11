@@ -65,6 +65,7 @@ from inferential_studio.core.timestamps import (
     parse_timestamps,
     spec_from_candidate,
 )
+from inferential_studio.ui.theme import TOKENS, tinted
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.timezone_combo import TimezoneCombo
 
@@ -79,18 +80,15 @@ class ImportPlan:
     variables: list[VariableMeta] = field(default_factory=list)
 
 
-def resolve_kind(
-    result_spec: TimestampSpec | None,
-    sample_id_column: str | None,
-    variables: list[VariableMeta],
-) -> SourceKind:
+def resolve_kind(sample_id_column: str | None, variables: list[VariableMeta]) -> SourceKind:
     """The source kind follows from the wizard's choices, not a type button.
 
-    A result-available time or a sample ID always means lab / analyzer data. Without those
-    markers, a target with no predictors is a sparse lab file; anything else — including the
-    common case of one CSV holding both the target and the predictors — is process data.
+    A sample ID column always means lab / analyzer data. Without it, a target with no
+    predictors is a sparse lab file; anything else — including the common case of one CSV
+    holding both the target and the predictors — is process data. Every source has a single
+    timestamp column (for lab data, the sample time).
     """
-    if result_spec is not None or sample_id_column is not None:
+    if sample_id_column is not None:
         return SourceKind.LAB
     roles = {v.role for v in variables}
     if VariableRole.TARGET in roles and VariableRole.PREDICTOR not in roles:
@@ -112,7 +110,6 @@ class _State:
         self.preview = pd.DataFrame()
         self.excel_system = 1900
         self.time_spec: TimestampSpec | None = None
-        self.result_spec: TimestampSpec | None = None
         self.sample_id_column: str | None = None
 
 
@@ -172,7 +169,7 @@ class FilePage(QWizardPage):
                 opts = ReadOptions(sheet=sheets[0] if sheets else None)
                 self.s.excel_system = excel_date_system(path)
         except (DataImportError, OSError) as exc:
-            self.message.setText(f"<span style='color:#b00020'>{exc}</span>")
+            self.message.setText(tinted(str(exc)))
             return False
         if self.s.path != path:  # keep options when coming back to the same file
             self.s.opts = opts
@@ -225,7 +222,7 @@ class ReadPage(QWizardPage):
 
         self.error = QLabel()
         self.error.setWordWrap(True)
-        self.error.setStyleSheet("color:#b00020")
+        self.error.setStyleSheet(f"color:{TOKENS['error']}")
         self.table = DataTableView(sortable=False)
 
         top = QHBoxLayout()
@@ -307,10 +304,9 @@ class TimestampChooser(QGroupBox):
 
     changed = Signal()
 
-    def __init__(self, title: str, state: _State, *, optional: bool = False) -> None:
+    def __init__(self, title: str, state: _State) -> None:
         super().__init__(title)
         self.s = state
-        self.optional = optional
         self.detection: FormatDetection | None = None
         self.timezone: TimezoneCombo | None = None
         self.column = QComboBox()
@@ -328,8 +324,6 @@ class TimestampChooser(QGroupBox):
     def populate(self, names: list[str], preferred: str | None) -> None:
         self.column.blockSignals(True)
         self.column.clear()
-        if self.optional:
-            self.column.addItem(NONE_ITEM)
         self.column.addItems(names)
         if preferred and preferred in names:
             self.column.setCurrentText(preferred)
@@ -362,7 +356,7 @@ class TimestampChooser(QGroupBox):
             values = read_column(self.s.path, self.s.opts, col)
             self.detection = detect_format(values)
         except (DataImportError, ValueError, OSError) as exc:
-            self.note.setText(f"<span style='color:#b00020'>{exc}</span>")
+            self.note.setText(tinted(str(exc)))
             self.format.blockSignals(False)
             self.changed.emit()
             return
@@ -378,11 +372,9 @@ class TimestampChooser(QGroupBox):
                 label += f"    e.g. {c.example_input} → {c.example_parsed}"
             self.format.addItem(label, c)
         if d.ambiguous:
-            self.note.setText(
-                "<b style='color:#b00020'>Day/month order is ambiguous.</b> " + d.message
-            )
+            self.note.setText(tinted("Day/month order is ambiguous.", bold=True) + " " + d.message)
         elif d.message:
-            self.note.setText(f"<span style='color:#b00020'>{d.message}</span>")
+            self.note.setText(tinted(d.message))
         elif d.recommended and d.recommended.order in (DateOrder.DAY_FIRST, DateOrder.MONTH_FIRST):
             order = "day-first" if d.recommended.order is DateOrder.DAY_FIRST else "month-first"
             self.note.setText(
@@ -419,9 +411,7 @@ class TimestampChooser(QGroupBox):
         return spec_from_candidate(col, cand, timezone, excel_date_system=self.s.excel_system)
 
     def is_complete(self) -> bool:
-        if self.selected_column is None:
-            return self.optional
-        return self.candidate() is not None
+        return self.selected_column is not None and self.candidate() is not None
 
 
 # --------------------------------------------------------------------------- page 3: timestamps
@@ -434,39 +424,31 @@ class TimePage(QWizardPage):
         self.setTitle("Timestamps")
         self.setSubTitle(
             "Confirm how times are written and which timezone the source system used. "
-            "All data is stored in UTC."
+            "All data is stored in UTC. For lab results, choose the sample time."
         )
         self.time = TimestampChooser("Timestamp", state)
-        self.result = TimestampChooser("Result available time", state, optional=True)
-        self.result.setToolTip(
-            "When the lab result was reported. Recorded for audit; models align to the sample time."
-        )
-        self.sample_id = QComboBox()
         self.tz = TimezoneCombo(state.default_timezone)
         self.tz.setToolTip("Timezone of values without an explicit UTC offset (plant local time).")
+        self.sample_id = QComboBox()
+        self.sample_id.setToolTip(
+            "Lab sample identifier (e.g. a LIMS id). Choosing one marks the file as lab / "
+            "analyzer data; the id is kept with each sample for traceability."
+        )
         self.preview = DataTableView(sortable=False)
         self.status = QLabel()
         self.status.setWordWrap(True)
 
-        tz_form = QFormLayout()
-        tz_form.addRow("Source timezone:", self.tz)
-        self.lab_box = QGroupBox("Lab / analyzer results (optional)")
-        self.lab_box.setToolTip("Setting these marks this source as lab data.")
-        lab_layout = QVBoxLayout(self.lab_box)
-        lab_layout.addWidget(self.result)
-        lab_form = QFormLayout()
-        lab_form.addRow("Sample ID column (optional):", self.sample_id)
-        lab_layout.addLayout(lab_form)
+        form = QFormLayout()
+        form.addRow("Source timezone:", self.tz)
+        form.addRow("Sample ID column (lab, optional):", self.sample_id)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.time)
-        layout.addWidget(self.lab_box)
-        layout.addLayout(tz_form)
+        layout.addLayout(form)
         layout.addWidget(self.status)
         layout.addWidget(self.preview, 1)
 
         self.time.changed.connect(self._update)
-        self.result.changed.connect(self._update)
         self.tz.currentTextChanged.connect(self._update)
 
     def initializePage(self) -> None:  # noqa: N802
@@ -479,9 +461,6 @@ class TimePage(QWizardPage):
         if self.s.time_spec:
             self.time.select_format(self.s.time_spec.format, self.s.time_spec.kind)
             self.tz.setCurrentText(self.s.time_spec.source_timezone)
-        self.result.populate(names, self.s.result_spec.column if self.s.result_spec else None)
-        if self.s.result_spec:
-            self.result.select_format(self.s.result_spec.format, self.s.result_spec.kind)
         self.sample_id.clear()
         self.sample_id.addItem(NONE_ITEM)
         self.sample_id.addItems(names)
@@ -493,7 +472,7 @@ class TimePage(QWizardPage):
         self.status.setText("")
         spec = self.time.spec(self.tz.timezone()) if self.tz.is_valid() else None
         if not self.tz.is_valid():
-            self.status.setText("<span style='color:#b00020'>Choose a valid timezone.</span>")
+            self.status.setText(tinted("Choose a valid timezone."))
         if spec is None:
             self.preview.set_frame(pd.DataFrame())
             self.completeChanged.emit()
@@ -502,7 +481,7 @@ class TimePage(QWizardPage):
         try:
             parsed = parse_timestamps(raw, spec)
         except (TimestampError, SchemaError) as exc:
-            self.status.setText(f"<span style='color:#b00020'>{exc}</span>")
+            self.status.setText(tinted(str(exc)))
             self.preview.set_frame(pd.DataFrame())
             self.completeChanged.emit()
             return
@@ -526,37 +505,29 @@ class TimePage(QWizardPage):
         self.preview.set_frame(frame)
         if parsed.n_invalid:
             self.status.setText(
-                f"{parsed.n_invalid} of the first {len(raw)} values cannot be interpreted with this format."
+                tinted(
+                    f"{parsed.n_invalid} of the first {len(raw)} values cannot be interpreted "
+                    "with this format.",
+                    "warning",
+                )
             )
         self.completeChanged.emit()
 
     def isComplete(self) -> bool:  # noqa: N802
-        if (
-            not self.tz.is_valid()
-            or not self.time.is_complete()
-            or self.time.spec(self.tz.timezone()) is None
-        ):
-            return False
-        return self.result.is_complete()
+        return (
+            self.tz.is_valid()
+            and self.time.is_complete()
+            and self.time.spec(self.tz.timezone()) is not None
+        )
 
     def validatePage(self) -> bool:  # noqa: N802
-        tz = self.tz.timezone()
-        self.s.time_spec = self.time.spec(tz)
-        self.s.result_spec = self.result.spec(tz)
+        self.s.time_spec = self.time.spec(self.tz.timezone())
         sid = self.sample_id.currentText()
         self.s.sample_id_column = sid if sid and sid != NONE_ITEM else None
-        if self.s.result_spec and self.s.result_spec.column == self.s.time_spec.column:
-            self.status.setText(
-                "<span style='color:#b00020'>Sample and result time must be different columns.</span>"
-            )
-            return False
         if self.s.time_spec is None:
             return False
-        time_columns = {self.s.time_spec.column, getattr(self.s.result_spec, "column", None)}
-        if self.s.sample_id_column is not None and self.s.sample_id_column in time_columns:
-            self.status.setText(
-                "<span style='color:#b00020'>The sample ID column cannot also be a time column.</span>"
-            )
+        if self.s.sample_id_column == self.s.time_spec.column:
+            self.status.setText(tinted("The sample ID column cannot also be the time column."))
             return False
         return True
 
@@ -605,11 +576,11 @@ class ColumnsPage(QWizardPage):
     def initializePage(self) -> None:  # noqa: N802
         self.table.blockSignals(True)
         s = self.s
-        used = {s.time_spec.column, s.sample_id_column, getattr(s.result_spec, "column", None)}
+        used = {s.time_spec.column, s.sample_id_column}
         columns = [n for n in s.names if n not in used]
         existing = {v.name for v in s.project.variables}
         has_target = s.project.target is not None
-        lab_markers = s.result_spec is not None or s.sample_id_column is not None
+        lab_markers = s.sample_id_column is not None
         self.table.setRowCount(len(columns))
         for row, name in enumerate(columns):
             prev = self.previous.get(name)
@@ -701,7 +672,7 @@ class ColumnsPage(QWizardPage):
 
     def isComplete(self) -> bool:  # noqa: N802
         problem = self._problem()
-        self.message.setText(f"<span style='color:#b00020'>{problem}</span>" if problem else "")
+        self.message.setText(tinted(problem))
         return not problem
 
 
@@ -732,7 +703,7 @@ class FinishPage(QWizardPage):
 
     def _resolved(self) -> tuple[SourceKind, list[VariableMeta]]:
         variables = self.s.columns.variables("_") if self.s.columns else []
-        return resolve_kind(self.s.result_spec, self.s.sample_id_column, variables), variables
+        return resolve_kind(self.s.sample_id_column, variables), variables
 
     def _kind_problem(self) -> str:
         kind, variables = self._resolved()
@@ -740,13 +711,13 @@ class FinishPage(QWizardPage):
             return (
                 "This import resolves to lab / analyzer data, which holds only the target. "
                 "Predictor columns must come from process data — mark them 'Not used' "
-                "or clear the result time / sample ID on the Timestamps page."
+                "or clear the sample ID column on the Timestamps page."
             )
         return ""
 
     def isComplete(self) -> bool:  # noqa: N802
         problem = self._kind_problem()
-        self.error.setText(f"<span style='color:#b00020'>{problem}</span>" if problem else "")
+        self.error.setText(tinted(problem))
         return not problem
 
     def initializePage(self) -> None:  # noqa: N802
@@ -829,7 +800,6 @@ class ImportWizard(QWizard):
         self.state.path = Path(src.path)
         self.state.opts = ReadOptions.from_source(src)
         self.state.time_spec = src.timestamp
-        self.state.result_spec = src.result_timestamp
         self.state.sample_id_column = src.sample_id_column
         self.columns_page.previous = {v.source_column: v for v in plan.variables}
 
@@ -845,13 +815,12 @@ class ImportWizard(QWizard):
     def plan(self) -> ImportPlan:
         s = self.state
         variables = self.columns_page.variables(self.source_id)
-        s.kind = resolve_kind(s.result_spec, s.sample_id_column, variables)
+        s.kind = resolve_kind(s.sample_id_column, variables)
         source = DataSource(
             source_id=self.source_id,
             kind=s.kind,
             path=str(s.path),
             timestamp=s.time_spec,
-            result_timestamp=s.result_spec,
             sheet=s.opts.sheet,
             delimiter=s.opts.delimiter,
             encoding=s.opts.encoding,

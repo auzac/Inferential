@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QTimer, Slot
-from PySide6.QtGui import QColor, QUndoStack
+from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -55,7 +55,7 @@ from inferential_studio.ui.messages import Level
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
-from inferential_studio.ui.theme import mark_primary
+from inferential_studio.ui.theme import mark_primary, theme_colour
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.plots import legend, note_label, plot_widget, scatter
 from inferential_studio.ui.widgets.time_axis import format_time, to_epoch_seconds
@@ -219,8 +219,8 @@ class ProcessingPage(StagePage):
         # -- preview / diagnostics tabs ------------------------------------------------
         self.tabs = QTabWidget()
         tz = session.project.display_timezone
-        self.x_plot = plot_widget(time_axis=tz)
-        self.y_plot = plot_widget(time_axis=tz)
+        self.x_plot = plot_widget(time_axis=tz, name="preview_x")
+        self.y_plot = plot_widget(time_axis=tz, name="preview_y")
         self.y_plot.setXLink(self.x_plot)
         legend(self.x_plot)
         self.sample_spin = QSpinBox()
@@ -252,7 +252,7 @@ class ProcessingPage(StagePage):
         pl.addWidget(self.sample_note)
         self.tabs.addTab(prev, "Preview")
 
-        self.lag_plot = plot_widget()
+        self.lag_plot = plot_widget(name="lag_sensitivity")
         self.lag_plot.setLabel("bottom", "Effective delay (deadtime + shift)", units="min")
         self.lag_plot.setLabel("left", "Pearson r with Y")
         self.lag_max = self._spin(1, 2880, " min", "Largest delay tested.")
@@ -299,14 +299,19 @@ class ProcessingPage(StagePage):
         self.tabs.addTab(self.samples_table, "Feature matrix")
         self.tabs.currentChanged.connect(lambda _i: self._fill_samples())
 
-        top = QSplitter(Qt.Orientation.Horizontal)
-        top.addWidget(self.table)
-        top.addWidget(editor)
-        top.setSizes([800, 320])
-        main = QSplitter(Qt.Orientation.Vertical)
-        main.addWidget(top)
-        main.addWidget(self.tabs)
-        main.setSizes([210, 520])
+        # Table above the preview on the left; the settings form runs the full height on the
+        # right, so the preview charts get the vertical space instead of the form.
+        left = QSplitter(Qt.Orientation.Vertical)
+        left.addWidget(self.table)
+        left.addWidget(self.tabs)
+        left.setSizes([200, 480])
+        left.setChildrenCollapsible(False)
+        main = QSplitter(Qt.Orientation.Horizontal)
+        main.addWidget(left)
+        main.addWidget(editor)
+        main.setSizes([820, 340])
+        main.setStretchFactor(0, 1)
+        main.setChildrenCollapsible(False)
         self.body.addWidget(main, 1)
 
         self._preview_timer = QTimer(self)
@@ -385,7 +390,7 @@ class ProcessingPage(StagePage):
             for c, text in enumerate(cells):
                 item = _item(text, spec.variable if c == 0 else None)
                 if c == 11 and not spec.is_causal:
-                    item.setForeground(QColor("#B00020"))
+                    item.setForeground(theme_colour("error"))
                 self.table.setItem(r, c, item)
             if spec.variable in selected:
                 self.table.selectRow(r)

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pyqtgraph as pg
 import pytest
-from pyqtgraph.GraphicsScene.mouseEvents import MouseClickEvent
+from pyqtgraph.GraphicsScene.mouseEvents import MouseClickEvent, MouseDragEvent
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QGraphicsSceneMouseEvent
 
@@ -141,40 +141,96 @@ def test_trend_view_click_pins_point_and_second_click_unlocks(qtbot):
     assert view._selected_x is None and cleared == [1]
     assert not view._sel_line_of[view.plots[0]].isVisible()
     assert len(seen) == 1
-    # Dragging a highlight band also releases the pin.
+    # Starting a drag also releases the pin.
     view._toggle_point(float(x[10]))
     view._set_band(float(x[30]), float(x[40]))
     assert view._selected_x is None and cleared == [1, 1]
+    view._finish_band(float(x[30]), float(x[40]))
 
 
-def test_trend_view_drag_creates_synced_band(qtbot):
+def _drag(view: TrendView, x0: float, x1: float) -> None:
+    """A left-drag on the first plot from time x0 to x1 (start, then finish)."""
+    vb = view.plots[0].vb
+    a, b = vb.mapViewToScene(pg.Point(x0, 0.0)), vb.mapViewToScene(pg.Point(x1, 0.0))
+    press = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMousePress)
+    press.setScenePos(a)
+    press.setButton(Qt.MouseButton.LeftButton)
+    move = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMouseMove)
+    move.setScenePos(b)
+    move.setButtonDownScenePos(Qt.MouseButton.LeftButton, a)
+    move.setButtons(Qt.MouseButton.LeftButton)
+    vb.mouseDragEvent(MouseDragEvent(move, press, None, start=True))
+    assert len(view._bands) == len(view.plots)  # highlighted on every chart while dragging
+    vb.mouseDragEvent(MouseDragEvent(move, press, press, finish=True))
+
+
+def _shown_view(qtbot, series: list[TrendSeries]) -> TrendView:
     view = TrendView("UTC")
     qtbot.addWidget(view)
+    view.resize(900, 600)
+    view.show()
+    view.set_series(series)
+    qtbot.wait(50)  # lay out the charts so view <-> pixel mapping is real
+    return view
+
+
+def test_trend_view_drag_zooms_to_period_and_back_steps_out(qtbot):
     x = to_epoch_seconds(pd.date_range("2026-01-01", periods=100, freq="1min", tz="UTC"))
-    view.set_series(
-        [TrendSeries("A", x, np.arange(100.0)), TrendSeries("B", x, np.arange(100.0) * 2)]
+    view = _shown_view(
+        qtbot, [TrendSeries("A", x, np.arange(100.0)), TrendSeries("B", x, np.arange(100.0) * 2)]
     )
-    view._set_band(float(x[5]), float(x[25]))
-    assert len(view._bands) == len(view.plots) == 2
-    for _plot, region in view._bands:
-        assert region.getRegion() == (float(x[5]), float(x[25]))
-    # Moving one band keeps the others in step.
-    view._bands[0][1].setRegion((float(x[8]), float(x[20])))
-    assert all(r.getRegion() == (float(x[8]), float(x[20])) for _plot, r in view._bands)
-    # A click anywhere else removes the highlight.
-    view._click_point(view.plots[0].vb, _click_event(view, float(x[60]), Qt.MouseButton.LeftButton))
-    assert view._bands == []
+    full = view.visible_x_range()
+    assert full[0] <= x[0] and full[1] >= x[-1]
+    assert not view.back_button.isEnabled()
+    _drag(view, float(x[10]), float(x[50]))
+    assert view._bands == []  # the highlight becomes the new view
+    lo, hi = view.visible_x_range()
+    assert lo == pytest.approx(float(x[10]), abs=1.0) and hi == pytest.approx(float(x[50]), abs=1.0)
+    # Every chart follows, and each y-axis fits the data now on screen (deferred refit).
+    assert view.plots[1].viewRange()[0] == pytest.approx([lo, hi])
+    qtbot.wait(20)
+    y_lo, y_hi = view.plots[0].viewRange()[1]
+    assert 5 <= y_lo <= 12 and 48 <= y_hi <= 55
+    assert view.back_button.isEnabled()
+    view.zoom_to(float(x[20]), float(x[30]))
+    view.zoom_back()
+    assert view.visible_x_range() == pytest.approx((lo, hi))
+    view.zoom_back()  # bottom of the history: the view before the first zoom
+    assert view.visible_x_range() == pytest.approx(full)
+    assert not view.back_button.isEnabled()
+    view.zoom_to(float(x[20]), float(x[30]))
+    view.fit_all()
+    lo, hi = view.visible_x_range()
+    assert lo <= x[0] and hi >= x[-1] and not view.back_button.isEnabled()
 
 
-def test_trend_view_right_click_raises_plot_menu(qtbot, monkeypatch):
+def test_trend_view_short_drag_does_not_zoom(qtbot):
+    x = to_epoch_seconds(pd.date_range("2026-01-01", periods=100, freq="1min", tz="UTC"))
+    view = _shown_view(qtbot, [TrendSeries("A", x, np.arange(100.0))])
+    before = view.visible_x_range()
+    _drag(view, float(x[10]), float(x[10]) + 1.0)  # far less than a few pixels
+    assert view._bands == [] and view.visible_x_range() == pytest.approx(before)
+    assert not view.back_button.isEnabled()
+
+
+def test_trend_view_right_click_opens_standard_chart_menu(qtbot, monkeypatch):
+    from inferential_studio.ui.widgets import chart_menu
+
     view = TrendView("UTC")
     qtbot.addWidget(view)
     x = to_epoch_seconds(pd.date_range("2026-01-01", periods=100, freq="1min", tz="UTC"))
     view.set_series([TrendSeries("A", x, np.arange(100.0))])
-    calls: list[Qt.MouseButton] = []
-    monkeypatch.setattr(pg.ViewBox, "raiseContextMenu", lambda self, ev: calls.append(ev.button()))
+    raw: list[Qt.MouseButton] = []
+    shown: list[object] = []
+    monkeypatch.setattr(pg.ViewBox, "raiseContextMenu", lambda self, ev: raw.append(ev.button()))
+    monkeypatch.setattr(chart_menu, "show_chart_menu", lambda v, pos: shown.append(v))
     view.plots[0].vb.mouseClickEvent(_click_event(view, float(x[50]), Qt.MouseButton.RightButton))
-    assert calls == [Qt.MouseButton.RightButton]
+    assert raw == []  # PyQtGraph's own menu (View All, axes, mouse mode …) never opens
+    assert shown == [view.canvas]  # the standard menu acts on every stacked chart
+    assert not view.plots[0].menuEnabled() and not view.plots[0].autoBtn.isVisible()
+    assert view._selected_x is None  # a right-click does not pin a point
+    assert not hasattr(view, "save_button")  # saving lives in the standard menu
+    assert view.fit_button.text() == "Fit all"
 
 
 def test_cursor_readout_locks_on_selected_point():
@@ -189,3 +245,79 @@ def test_cursor_readout_locks_on_selected_point():
     box.unlock()
     box.show_hover("t3", {"A": "3"})
     assert box.title() == "At cursor" and "t3" in box.time_label.text()
+
+
+def test_table_numbers_are_readable():
+    from inferential_studio.ui.widgets.data_table import format_value
+
+    assert format_value(1.227e-17) == "0"  # floating-point residue, e.g. an OLS training bias
+    assert format_value(-0.392929) == "-0.39293"
+    assert format_value(0.000637) == "0.000637"
+    assert format_value(6.4e-05) == "6.400e-05"
+    assert format_value(316.0) == "316"
+    assert format_value(40320.0) == format_value(np.int64(40320)) == "40,320"
+    assert format_value(2026) == "2026"  # four-digit ids and years stay ungrouped
+    assert format_value(123456.7) == "123,457"
+    assert format_value(True) == "Yes" and format_value(float("nan")) == ""
+
+
+def test_plot_placeholder_hides_axes_until_data(qtbot):
+    from inferential_studio.ui.widgets.plots import (
+        clear_placeholder,
+        legend,
+        plot_widget,
+        show_placeholder,
+    )
+
+    plot = plot_widget()
+    qtbot.addWidget(plot)
+    legend(plot)
+    show_placeholder(plot, "Nothing yet")
+    item = plot.getPlotItem()
+    assert not item.getAxis("left").isVisible() and not item.legend.isVisible()
+    assert plot.property("placeholder") == "Nothing yet"
+    clear_placeholder(plot)
+    assert item.getAxis("left").isVisible() and item.legend.isVisible()
+    assert plot.property("placeholder") == ""
+
+
+def test_every_chart_uses_the_standard_menu(qtbot, monkeypatch, tmp_path):
+    from inferential_studio.ui.widgets import chart_menu
+    from inferential_studio.ui.widgets.plots import plot_widget, show_placeholder
+
+    plot = plot_widget("Residual vs predicted")
+    qtbot.addWidget(plot)
+    plot.resize(400, 300)
+    plot.plot([0, 1, 2], [1, 3, 2])
+    assert isinstance(plot.getPlotItem().vb, chart_menu.ChartViewBox)
+    assert not plot.getPlotItem().autoBtn.isVisible()
+    shown: list[object] = []
+    monkeypatch.setattr(chart_menu, "show_chart_menu", lambda v, pos: shown.append(v))
+    vb = plot.getPlotItem().vb
+    press = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMousePress)
+    press.setScenePos(vb.mapViewToScene(pg.Point(1.0, 2.0)))
+    press.setButton(Qt.MouseButton.RightButton)
+    vb.mouseClickEvent(MouseClickEvent(press))
+    assert shown == [plot]
+    assert chart_menu.chart_name(plot) == "residual_vs_predicted"
+    assert chart_menu.save_chart(plot, tmp_path / "chart.png")
+    assert (tmp_path / "chart.png").stat().st_size > 0
+    show_placeholder(plot, "Nothing yet")  # no menu on an empty chart
+    vb.mouseClickEvent(MouseClickEvent(press))
+    assert shown == [plot]
+
+
+def test_chart_menu_has_copy_and_save_only(qtbot):
+    from inferential_studio.ui.widgets import chart_menu
+    from inferential_studio.ui.widgets.plots import plot_widget
+
+    plot = plot_widget(name="lag_sensitivity")
+    qtbot.addWidget(plot)
+    menu = chart_menu.show_chart_menu(plot, plot.mapToGlobal(plot.rect().center()))
+    assert [a.text() for a in menu.actions()] == ["Copy image", "Save image…"]
+    menu.close()
+    assert chart_menu.chart_name(plot) == "lag_sensitivity"
+    chart_menu.copy_chart(plot)
+    from PySide6.QtGui import QGuiApplication
+
+    assert not QGuiApplication.clipboard().pixmap().isNull()

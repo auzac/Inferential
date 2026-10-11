@@ -46,6 +46,7 @@ from inferential_studio.core.schemas import (
     RuleOperator,
     SchemaError,
 )
+from inferential_studio.ui.theme import tinted
 
 REASON_LABELS = {
     ExclusionReason.SHUTDOWN: "Shutdown",
@@ -559,7 +560,7 @@ class RuleDialog(QDialog):
         try:
             rule = self.result_rule()
         except SchemaError as exc:
-            self.preview_label.setText(f"<span style='color:#b00020'>{exc}</span>")
+            self.preview_label.setText(tinted(str(exc)))
             return
         self.preview_label.setText(f"<b>{rule.describe()}</b><br>{self._preview(rule)}")
 

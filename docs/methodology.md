@@ -56,9 +56,10 @@ later value. It is labelled preliminary in the UI because it ignores deadtime an
 
 - One supervised observation = **one valid lab/analyzer sample**. Sparse targets are never
   forward-filled onto the process grid.
-- Lab samples carry a **sample (collection) time** and optionally a **result (availability)
-  time**. Feature alignment uses the sample time. The result time is recorded for audit and for
-  deployment-delay analysis; it is never mistaken for the sample time.
+- Every source has **one timestamp column**; for lab data it is the **sample (collection)
+  time**, and feature alignment uses it. A separate result-availability time is not imported
+  by the wizard (projects that already record one keep it for audit only; it is never mistaken
+  for the sample time).
 
 ## Exclusions and cleaning
 

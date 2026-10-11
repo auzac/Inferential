@@ -12,18 +12,21 @@ STAGE_HELP: dict[str, str] = {
     "import": """
 <h3>Data Import</h3>
 <p>Use <b>Import data…</b> for any file: a process file (historian export: one timestamp column,
-many tags), a lab file (sample time, optional result time and sample id, the measured value), or
-one CSV holding <b>both the target and the predictors</b>. The wizard recognises the type from
-your choices.</p>
+many tags), a lab file (sample time, optional sample id, the measured value), or one CSV holding
+<b>both the target and the predictors</b>. Every file has one timestamp column; the wizard
+recognises the type from your choices.</p>
 <ul><li>The wizard detects the timestamp format; ambiguous dates (e.g. 03/04) must be confirmed.</li>
 <li>Set the timezone the file was written in. Everything is stored in UTC.</li>
 <li>Check the validation report for gaps, duplicates and text cells.</li></ul>
-<p>New here? <i>Generate example dataset</i> creates a complete artificial project.</p>""",
+<p>New here? <i>Help → Generate Example Dataset</i> creates a complete artificial project.</p>""",
     "initial_eda": """
 <h3>Initial EDA</h3>
 <p>Look at the <b>raw</b> data before changing anything: trends, statistics, correlations,
 coverage and a first X–Y screening.</p>
-<ul><li>Wheel zooms, middle-drag pans, click pins a time, drag highlights a period.</li>
+<ul><li>Drag across a chart to zoom to that period; <b>Back</b> steps out, <b>Fit all</b> shows
+everything. The wheel zooms, middle-drag pans and a click pins the values at a time.</li>
+<li>The correlation matrix and scatter matrix follow the variables you tick.</li>
+<li>Right-click any chart to copy it or save it as an image.</li>
 <li>Shutdowns and regime changes inflate correlations; clean first, then judge.</li></ul>""",
     "cleaning": """
 <h3>Cleaning &amp; Exclusions</h3>
