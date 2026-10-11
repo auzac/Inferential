@@ -52,9 +52,9 @@ def test_shell_has_nine_stages_and_navigation(window):
     assert isinstance(window.stack.currentWidget(), ImportPage)
     window.sidebar.setCurrentRow(1)
     assert isinstance(window.stack.currentWidget(), EdaPage)
-    window.sidebar.setCurrentRow(6)
+    window.sidebar.setCurrentRow(8)
     page = window.stack.currentWidget()
-    assert isinstance(page, PlaceholderPage) and page.stage.key == "training"
+    assert isinstance(page, PlaceholderPage) and page.stage.key == "export"
     assert window.windowTitle().startswith("Untitled project")
     assert window.act_import.isEnabled()
     assert window.lbl_records.text() == "Process records: —"

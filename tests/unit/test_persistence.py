@@ -209,3 +209,49 @@ def test_schema_v1_file_is_migrated(tmp_path, project):
     loaded = load_project(path)
     assert loaded.source("lab").sample_id_column is None
     assert loaded.source("process").effective_duplicate_policy.value == "error"
+
+
+def test_schema_v3_file_gets_default_modelling_settings(tmp_path, project):
+    """Files saved by v0.2.x (schema 3) have no alignment or modelling sections."""
+    data = to_jsonable(project)
+    data.pop("alignment")
+    data.pop("modelling")
+    path = _write_zip(
+        tmp_path / "v3.imsproj", {"manifest.json": _manifest(3), "project.json": json.dumps(data)}
+    )
+    loaded = load_project(path)
+    assert loaded.alignment.reject_regime_overlap
+    assert [m.kind.value for m in loaded.modelling.models] == ["mlr", "pls", "pcr", "ridge"]
+    assert loaded.modelling.split.train_fraction == 0.6
+
+
+def test_modelling_settings_roundtrip(tmp_path, project):
+    from dataclasses import replace
+    from datetime import UTC, datetime
+
+    from inferential_studio.core.schemas import (
+        CvKind,
+        ModelKind,
+        ModellingConfig,
+        ModelSpec,
+        Scaling,
+        SplitConfig,
+        SplitMode,
+    )
+
+    cfg = ModellingConfig(
+        scaling=Scaling.ROBUST,
+        split=SplitConfig(
+            mode=SplitMode.DATES,
+            train_end=datetime(2026, 3, 10, tzinfo=UTC),
+            validation_end=datetime(2026, 3, 12, tzinfo=UTC),
+            purge_s=3600.0,
+            cv_kind=CvKind.BLOCKED,
+            cv_folds=3,
+        ),
+        models=(ModelSpec(ModelKind.PLS, n_components=3), ModelSpec(ModelKind.RIDGE, alpha=0.5)),
+        one_standard_error=False,
+    )
+    project = replace(project, modelling=cfg)
+    save_project(project, tmp_path / "m.imsproj")
+    assert load_project(tmp_path / "m.imsproj").modelling == cfg

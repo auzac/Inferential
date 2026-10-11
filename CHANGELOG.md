@@ -3,6 +3,58 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## v0.4.0 — Milestone 4: modelling, interpretation and validation (2026-10-11)
+
+### Added
+- Model Setup page: MLR, PLS, PCR and Ridge candidates; components / alpha tuned by
+  time-aware cross-validation inside the training period (or fixed); standard, robust or no
+  scaling, fitted on training samples only; optional one-standard-error rule.
+- Chronological train / validation / final-test split by share of eligible samples or by dates,
+  with an automatic (or manual) purge gap so no process data is shared across a boundary;
+  expanding-window or blocked CV folds with the same purge. Live split chart and a list of
+  problems (too few samples, constant variables, strong autocorrelation with effective sample
+  size, impossible folds, non-causal features).
+- Training & Interpretation page: coefficients in original units and standardised,
+  cross-validation curve with standard errors, PLS VIP, X weights and X loadings, PCR
+  loadings, scores plots coloured by period and explained-variance charts (X and Y kept
+  separate). Training runs in the background; results are marked out of date after edits.
+- Validation page: comparison table on identical samples for every model (ranked by
+  validation RMSE), per-period metrics (R², adjusted R², RMSE, MAE, bias, max |error|, RMSE as
+  % of training SD), actual-vs-predicted, trend, residuals vs time / prediction / any
+  predictor, residual histogram and autocorrelation, applicability ranges. Final-test results
+  stay hidden until explicitly revealed, with a warning about exploratory reuse.
+- Core: `splits.py`, `models.py`; schema 4 stores the modelling configuration (v3 files open
+  with defaults). Methodology, user guide and benchmarks updated.
+- `--smoke-test` also aligns and trains all four model types on a small synthetic dataset, so
+  a packaged build with missing numerical libraries fails its build check.
+
+## v0.3.0 — Milestone 3: variable diagnostics and time processing (2026-10-11)
+
+### Added
+- Variable Selection page: target and predictor choice (undoable), ranking by aligned Pearson /
+  Spearman correlation, VIF with constant/singular handling, adjustable `|r|` warning, aligned
+  correlation heatmap, per-predictor sample impact, raw-vs-cleaned statistics and screening
+  correlations.
+- Signal Processing page: per-predictor deadtime, signed shift, window, lookback/centred
+  placement, aggregation (mean, median, min, max, SD, last), trailing filter (rolling
+  mean/median, EWMA), causal resampling, minimum coverage and maximum gap; batch apply;
+  causal/non-causal warning; option to reject windows overlapping operating-regime exclusions;
+  preview of cleaned vs processed signal with the moving window of any lab sample; lag
+  sensitivity on the training period only; coverage report and full feature matrix with the
+  reason for every unusable sample.
+- Core: `features.py` (one row per lab sample, never forward-filled Y, exclusions respected,
+  deterministic), `diagnostics.py`. Aligned features are recomputed in the background after
+  every relevant edit.
+- Tests: hand-calculated windows, causality under future perturbation, synthetic 20-minute
+  deadtime recovery, determinism, end-to-end save/reopen reproducibility.
+
+### Changed
+- Tables keep the order of their data (e.g. rankings) until a column header is clicked, and
+  long tables fill much faster (cells read from column arrays; column widths measured on the
+  first 200 rows).
+- Timestamp conversion to nanoseconds is much faster on large indexes (benefits rules,
+  exclusions and alignment).
+
 ## v0.2.2 — Trend selection interactions (2026-10-11)
 
 ### Added

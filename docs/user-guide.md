@@ -1,7 +1,8 @@
 # User guide
 
-This guide grows with each release. It covers what works in **v0.2.0**: projects, data import,
-raw exploration and cleaning (stages 1–3). Stages 4–9 show which milestone delivers them.
+This guide grows with each release. It covers what works in **v0.4.0**: projects, data import,
+raw exploration, cleaning, variable selection, signal processing, model training and
+validation (stages 1–8). Export and reporting (stage 9) arrive in Milestone 5.
 
 ## 1. Start with the example
 
@@ -109,10 +110,94 @@ off, edited or undone (**Edit → Undo**, Ctrl+Z).
   rows and approximate hours. The status bar shows the share of rows excluded for all
   variables.
 
-## 6. Projects
+## 6. Choose the target and predictors (Variable Selection)
 
-- **Save / Save As** write a `.imsproj` file holding all settings and references to your data
-  files (with checksums). Saving is atomic, so an interrupted save cannot damage the previous
+- **Target (Y)** — usually a lab variable. Changing it refreshes every statistic.
+- **Candidate predictors (X)** — tick process variables (search box for many tags; *All* /
+  *None*). Every tick is one undoable step.
+- **Ranking & VIF** — correlation of each *aligned* feature with Y on model-eligible lab
+  samples (after the deadtime, window and filters of Signal Processing), the VIF of each
+  predictor, and the simple screening correlation on raw and cleaned data for comparison. High
+  VIF or `|r|` above the threshold you set are warnings: PLS, PCR and Ridge cope with correlated
+  predictors; for MLR keep one variable of each correlated group.
+- **Correlation (aligned)** — heatmap of the aligned features with Y in the first row.
+- **Sample impact** — how many more samples would be usable without each predictor (a
+  predictor with poor coverage can cost many samples).
+- **Raw vs cleaned** — statistics before and after your exclusions.
+
+## 7. Align predictors to the lab samples (Signal Processing)
+
+Each lab sample becomes one row; every predictor contributes one value computed from a time
+window before the sample time. Y is never filled in between samples.
+
+- Select one or more predictors in the table, edit the settings on the right and press
+  **Apply to selected** (or **Apply to all**):
+  - **Deadtime** — how long a change in X takes to show in Y. The window ends this long before
+    the sample time. **Shift** is an extra signed offset; the table's *Uses data from* column
+    shows the combined effect, e.g. `(t − 50 min, t − 20 min]`.
+  - **Window** and **Aggregation** (mean, median, min, max, standard deviation, last value).
+  - **Placement** — *lookback* (default) or *centred*. A centred window, or a negative total
+    delay, reads data recorded after the sample: the page shows a warning, because an online
+    model cannot see the future.
+  - **Filter** (trailing rolling mean/median or EWMA) and **Resample** (averages ending at each
+    interval) are applied before the window.
+  - **Min coverage** and **Max gap** — a window with too little data leaves that sample unusable
+    instead of averaging a few points.
+  - *Reject windows that overlap operating-regime exclusions* keeps shutdowns and start-ups out
+    of every window.
+- **Preview** — the cleaned signal (grey), the processed signal (blue) and, for the chosen lab
+  sample (◀ ▶), its window (orange band) and the resulting feature value. The lab samples are
+  shown below (grey = not usable). The status line explains the sample's result.
+- **Lag sensitivity** — correlation with Y for a range of delays, using only the training
+  period of the current split. *Use best delay as deadtime* copies the peak, but prefer a delay
+  that is physically plausible.
+- **Coverage report** — per predictor, how many samples fail each check. **Feature matrix** —
+  every lab sample with its feature values, eligibility and the reason when it is not usable.
+
+## 8. Configure the models (Model Setup)
+
+- **Models to compare** — MLR, PLS, PCR and Ridge. For PLS/PCR the number of components, and
+  for Ridge the alpha, is either tuned by cross-validation (search range) or fixed.
+- **Scaling** — standardise (default), robust or none; always learned from training samples.
+- **Split** — by share of eligible samples (default 60 % training, 20 % validation, 20 % final
+  test, in time order) or by dates. The chart shows which samples fall where.
+- **Purge gap** — samples just before a boundary whose windows would share process data with
+  the next period are left out. Automatic = the longest feature history.
+- **Cross-validation** — inside the training period only: expanding window (default) or blocked
+  folds. *Prefer the simplest setting within one standard error* avoids over-fitted choices.
+- Problems (too few samples, constant variables, strong autocorrelation …) are listed under the
+  chart. **Train models** runs in the background and opens the next page.
+
+## 9. Interpret the models (Training & Interpretation)
+
+Choose a model at the top. **Coefficients** shows standardised coefficients (comparable across
+predictors) and a table with coefficients in original units. **Cross-validation** shows the CV
+error against components or alpha, the best and the chosen setting. For PLS and PCR:
+**Loadings & VIP** (PLS: VIP, X weights, X loadings; PCR: PCA loadings), **Scores** and
+**Explained variance**. Coefficients and VIP describe how the model uses its inputs, not physical
+cause and effect. If you change settings after training, a banner says the results are out of
+date until you train again.
+
+## 10. Compare and validate (Validation)
+
+- The **comparison table** ranks the models by validation RMSE (or CV RMSE without a validation
+  period) and shows R², RMSE, MAE and bias (mean of predicted − actual) for training and
+  validation. All models use exactly the same samples.
+- **Show final test results…** reveals the untouched final test period. Look at it once, after
+  choosing a model: changing models afterwards makes the test result exploratory.
+- For the chosen model: metrics per period, **Actual vs predicted**, **Trend** at the lab sample
+  times, residuals against time, prediction and any predictor, residual histogram and
+  autocorrelation, and **Applicability** — the training range of every predictor and how many
+  later samples fall outside it.
+- Prefer a model that is accurate *and* simple, stable and physically sensible. Good fit
+  statistics alone do not make a model ready for online use.
+
+## 11. Projects
+
+- **Save / Save As** write a `.imsproj` file holding all settings (including target, predictors,
+  feature settings, split and model settings) and references to your data files (with
+  checksums). Trained models are recalculated from these settings; saving fitted models and
+  exporting reports arrive in Milestone 5. Saving is atomic, so an interrupted save cannot damage the previous
   file. Saving to another folder keeps the data references valid.
 - If a data file has changed since import, opening the project tells you which one and asks
   whether to accept the new contents.

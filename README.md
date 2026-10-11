@@ -5,10 +5,11 @@ inferential models (soft sensors), starting with distillation columns.
 
 Python · PySide6 (Qt 6) · PyQtGraph · pandas · scikit-learn. No cloud services, no telemetry.
 
-> **Status: v0.2.0 — Milestone 2 (cleaning and exclusions).** Import with a timestamp
-> wizard, raw EDA, and cleaning: manual exclusions on the charts, a visual rule builder,
-> anomaly detectors with accept/reject review, and undo/redo. Variable selection and signal
-> processing arrive in Milestone 3. See the [user guide](docs/user-guide.md).
+> **Status: v0.4.0 — Milestones 3 and 4 (alignment, modelling and validation).** Import with
+> a timestamp wizard, raw EDA, cleaning with reviewable flags, variable selection with VIF,
+> per-predictor deadtime/window/filter alignment to lab samples, MLR / PLS / PCR / Ridge with
+> chronological splits and time-aware CV, interpretation and validation plots. Export, model
+> artifacts and the report arrive in Milestone 5. See the [user guide](docs/user-guide.md).
 
 ## Quick start (Windows, PowerShell)
 
@@ -68,14 +69,18 @@ src/inferential_studio/
     rules.py              rule evaluation (typed conditions, AND/OR, minimum duration)
     quality.py            anomaly detectors producing reviewable flag events
     exclusions.py         unified exclusion masks with per-reason categories
+    features.py           alignment to lab samples: resample, filter, windows, coverage, lag scan
+    diagnostics.py        raw-vs-cleaned statistics, aligned correlations, VIF
+    splits.py             chronological train/validation/test split, purge gap, time-aware CV
+    models.py             MLR/PLS/PCR/Ridge pipelines, tuning, interpretation, metrics
     synthetic.py          synthetic distillation dataset with ground truth
     tasks.py              progress/cancellation primitives for long-running functions
   infrastructure/         logging, per-user settings, paths, background TaskManager (Qt)
   ui/                     main window, stage pages, dialogs, widgets (no algorithms)
 tests/
-  unit/                   schemas, persistence, synthetic data, settings, core/Qt isolation
-  gui/                    pytest-qt: main window, background workers
-  integration/            sample-project fixture and generate → load → save → reload
+  unit/                   core numerics: timestamps, import, rules, detectors, alignment, models …
+  gui/                    pytest-qt: every working page, background workers, undo
+  integration/            import → clean → align → train → save → reload with identical results
 examples/synthetic_distillation/   artificial data + sample project
 packaging/                PyInstaller spec, Windows build script, license inventory
 docs/                     methodology conventions, file formats, packaging
@@ -98,8 +103,8 @@ licenses/                 LGPL/GPL v3 texts shipped with the application
 ## Documentation
 
 - [docs/user-guide.md](docs/user-guide.md) — how to use the application
-- [docs/methodology.md](docs/methodology.md) — time, import, window, causality and exclusion conventions
-- [docs/benchmarks.md](docs/benchmarks.md) — measured import and statistics performance
+- [docs/methodology.md](docs/methodology.md) — time, import, exclusion, alignment, split, model and metric definitions
+- [docs/benchmarks.md](docs/benchmarks.md) — measured import, statistics, alignment and training performance
 - [docs/file-formats.md](docs/file-formats.md) — project file and example data formats
 - [docs/packaging.md](docs/packaging.md) — Windows build, licensing obligations
 - [LICENSES.md](LICENSES.md) — third-party notices

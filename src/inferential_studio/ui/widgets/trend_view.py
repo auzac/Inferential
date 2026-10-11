@@ -240,9 +240,7 @@ class TrendView(QWidget):
         plot.addItem(pin, ignoreBounds=True)
         # Every pan/zoom re-fits this plot's curves to the visible window (cheap: the
         # data comes from the precomputed envelope or a small raw slice).
-        plot.vb.sigRangeChanged.connect(
-            lambda *_args, p=plot: self._update_plot_data(p)
-        )
+        plot.vb.sigRangeChanged.connect(lambda *_args, p=plot: self._update_plot_data(p))
         self._vlines.append(vline)
         self._vline_of[plot] = vline
         self._sel_line_of[plot] = pin

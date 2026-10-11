@@ -60,32 +60,6 @@ later value. It is labelled preliminary in the UI because it ignores deadtime an
   time**. Feature alignment uses the sample time. The result time is recorded for audit and for
   deployment-delay analysis; it is never mistaken for the sample time.
 
-## Feature windows
-
-For a target sample at time `t` and one predictor:
-
-| Symbol | Meaning | Constraint |
-|---|---|---|
-| `d` | process deadtime (`deadtime_s`) | `d >= 0` |
-| `L` | additional signed shift (`shift_s`) | positive = further into the past |
-| `D = d + L` | effective delay (`effective_delay_s`), applied **once** | |
-| `W` | window length (`window_s`) | `W > 0` |
-
-Windows are **left-open, right-closed** so consecutive windows never double-count a sample:
-
-- Lookback (default): `(t − D − W, t − D]`
-- Centered: `(t − D − W/2, t − D + W/2]`
-
-A feature is **causal** when its window ends at or before `t` (`window end offset <= 0`) and
-its filter is trailing. Causality is computed (`FeatureSpec.is_causal`), shown in the UI and
-recorded with every model. Non-causal features are allowed only for retrospective analysis and
-are flagged.
-
-## Filters
-
-All offered filters (rolling mean, rolling median, EWMA) are **trailing** and time-based.
-Centered smoothing is not offered for deployable pipelines.
-
 ## Exclusions and cleaning
 
 - Raw imported data is never modified or deleted. Exclusions are masks over the normalized
@@ -119,7 +93,156 @@ Centered smoothing is not offered for deployable pipelines.
   variable's value at the same time.
 - Lab target samples are excluded by regime intervals, intervals naming the target, and
   accepted target flags. Whether a sample has enough valid process history behind it (rules,
-  coverage, feature windows) is decided during alignment in Milestone 3.
+  coverage, feature windows) is decided during alignment (below).
+
+## Feature windows
+
+For a target sample at time `t` and one predictor:
+
+| Symbol | Meaning | Constraint |
+|---|---|---|
+| `d` | process deadtime (`deadtime_s`) | `d >= 0` |
+| `L` | additional signed shift (`shift_s`) | positive = further into the past |
+| `D = d + L` | effective delay (`effective_delay_s`), applied **once** | |
+| `W` | window length (`window_s`) | `W > 0` |
+
+Windows are **left-open, right-closed** so consecutive windows never double-count a sample:
+
+- Lookback (default): `(t − D − W, t − D]`
+- Centered: `(t − D − W/2, t − D + W/2]`
+
+A feature is **causal** when its window ends at or before `t` (`window end offset <= 0`) and
+its filter is trailing. Causality is computed (`FeatureSpec.is_causal`), shown in the UI and
+recorded with every training run. Non-causal features are allowed only for retrospective
+analysis and are flagged on the Signal Processing page and in every training run.
+
+## Feature processing order (`core/features.py`)
+
+For each predictor, in this order:
+
+1. **Clean** — the normalized process values minus every excluded cell (manual intervals,
+   rules, accepted or auto-excluded flags) and minus blank/text cells. Nothing is interpolated
+   or carried forward.
+2. **Resample** (optional, interval `R`) — valid values are averaged in bins `(kR − R, kR]`,
+   labelled at the bin **end** `kR` (bins aligned to the UTC epoch). A resampled value never
+   uses data recorded after its label time. Bins without valid data stay empty.
+3. **Filter** (optional, always trailing, time-based) — rolling mean or median over
+   `(τ − F, τ]`, or an EWMA with time-based half-life (pandas `ewm(halflife, times)`), evaluated
+   only at valid points and only from valid points. The start of the record and the edges of
+   excluded periods simply have fewer points in the filter window. Centred smoothing is not
+   offered.
+4. **Aggregate** each lab sample's window: mean, median, minimum, maximum, standard deviation
+   (`n − 1`, needs two values) or last valid value.
+
+Quality checks per window (a failure leaves the feature empty for that sample):
+
+| Check | Definition |
+|---|---|
+| Coverage | (valid values in the window × sampling interval) ÷ `W`, capped at 1. The sampling interval is the variable's median spacing, or `R` when resampled. Must be ≥ `min_coverage` (default 80 %). |
+| Largest gap | Longest time inside the window without a valid value; the window edges count as boundaries, so regular sampling gives one sampling interval. Must be ≤ `max_gap_s` when set. |
+| Too few values | Standard deviation needs at least two values. |
+| Regime overlap | With *Reject windows that overlap operating-regime exclusions* (on by default), a window touching any row excluded for all signals (shutdown, start-up …) fails even if coverage passes. |
+
+A feature's **data history** is its window plus the filter's memory (rolling window, or five
+EWMA half-lives) plus one resample interval. The longest history sets the automatic purge gap.
+
+Not yet offered (planned): bounded interpolation / carry-forward of process X with explicit
+consent, and composite lab samples with a collection interval.
+
+## Lab alignment and eligibility
+
+- One feature row per lab sample, at the **sample (collection) time**. Replicates (same time)
+  stay separate rows and share their windows; result (availability) times and sample ids are
+  carried along for audit.
+- Y is never forward-filled or interpolated; process rows without a lab sample produce no
+  supervised row.
+- A row is **model-eligible** only when Y is a valid number, Y is not excluded, and every
+  selected predictor passes all window checks. Unreviewed (pending) flags on Y do not exclude
+  it; they are counted on the Signal Processing page.
+- The coverage report counts, per predictor and among samples with a usable Y, how many fail
+  each check; the feature matrix lists the reason for every ineligible row.
+
+## Variable diagnostics (`core/diagnostics.py`)
+
+- **Raw vs cleaned**: summary statistics of the process data before and after exclusions, plus
+  the screening X–Y correlation (last value at or before each lab sample, no deadtime) on both.
+- **Aligned correlations**: Pearson and Spearman between each aligned feature and Y, and among
+  features, on model-eligible rows only.
+- **VIF** of predictor j = 1 / (1 − R²ⱼ) from an OLS regression with intercept of xⱼ on the
+  other predictors (complete rows). Constant predictors have no VIF; an exact linear combination
+  has VIF = ∞. `|r| > 0.9` (adjustable) and `VIF > 10` are warnings, never automatic deletions.
+- **Sample impact**: for each predictor, how many more samples would be eligible without it.
+- **Lag sensitivity**: correlation of the aligned feature with Y for a range of effective
+  delays, computed **only on samples in the training period** of the current split settings,
+  so the final test period never influences the chosen delay. It is exploratory
+  (autocorrelation and common trends also correlate); choose a physically plausible delay.
+
+## Splits and cross-validation (`core/splits.py`)
+
+- **Chronological** train → validation → final test, by share of eligible samples (default
+  60 / 20 / 20) or by explicit boundary instants (train `t < train_end`, validation
+  `train_end ≤ t < test_start`, test `t ≥ test_start`). Rows are never shuffled; replicate
+  samples share a time and therefore a split.
+- **Purge gap**: two samples whose feature histories overlap share process data. Before each
+  boundary the **earlier** period drops samples closer than the purge gap to the first sample
+  of the next period; the final test period is never trimmed. Default gap = the longest feature
+  history; it can be set longer (e.g. for slow process dynamics).
+- **Cross-validation** runs only inside the training period, on contiguous blocks of sample
+  times: *expanding window* (rolling origin, default) trains on all earlier blocks and
+  validates on the next one; *blocked k-fold* holds out each block in turn. The purge gap
+  applies at every fold boundary (both sides for blocked folds). Impossible fold layouts are
+  reported.
+
+## Models (`core/models.py`)
+
+Each candidate is a scikit-learn pipeline `scaler → estimator`, fitted on training samples only:
+
+| Model | Estimator | Hyperparameter |
+|---|---|---|
+| MLR | `LinearRegression` | — |
+| PLS | `PLSRegression(scale=False)` after the chosen scaler | components 1…max (CV) or fixed |
+| PCR | `PCA(svd_solver="full")` → `LinearRegression` | components 1…max (CV) or fixed |
+| Ridge | `Ridge` | alpha on a log grid (CV) or fixed |
+
+Scaling: standardise (mean/SD), robust (median/IQR) or none — always fitted on training samples
+only. Tuning minimises the mean CV RMSE; with the *one-standard-error* option (default) the
+simplest setting (fewest components, largest alpha) whose mean CV RMSE is within one standard
+error of the best is chosen. Component counts are capped at the number of predictors and at the
+smallest CV training fold − 1. The validation period ranks the models; the final test period is
+evaluated with the same fitted pipelines, but the application hides its metrics until the user
+explicitly reveals them. All models of one run share the same split.
+
+Invalid situations are reported, not hidden: fewer than 10 training samples, constant target or
+predictor in the training period, MLR with too few samples for its predictors (or linearly
+dependent predictors — the minimum-norm solution is shown with a warning), more components than
+possible, impossible CV folds, and strongly autocorrelated targets (effective sample size
+`n(1 − ρ₁)/(1 + ρ₁)` from the lag-1 autocorrelation of consecutive lab samples).
+
+## Interpretation
+
+- **Coefficients in original units**: every pipeline is affine, so `ŷ = b₀ + Σ bⱼxⱼ` is
+  recovered exactly from predictions at the origin and at unit vectors. This is the model as it
+  runs on the aligned, filtered **features** — not on raw tag values.
+- **Standardised coefficients**: `bⱼ · sd(xⱼ) / sd(y)` with training standard deviations.
+- **PLS**: X weights `W`, X loadings `P`, Y loadings `q` and scores `T` are distinct objects and
+  are labelled as such. **VIP** (Wold): `VIPⱼ = sqrt(p · Σₐ SSₐ (wⱼₐ/‖wₐ‖)² / Σₐ SSₐ)` with
+  `SSₐ = qₐ² · tₐᵀtₐ` on training data (so `Σ VIP² = p`). X variance per component =
+  `‖tₐpₐᵀ‖² / ‖X₀‖²`; Y variance per component = `SSₐ / ‖y₀‖²`.
+- **PCR**: PCA loadings (eigenvectors), scores and explained X-variance ratio — which is not
+  the share of Y explained.
+- No coefficient confidence intervals or p-values are shown: lab samples are autocorrelated
+  and predictors correlated, so textbook OLS standard errors would overstate certainty.
+
+## Metrics
+
+Per split, with `e = predicted − actual`: `n`; `R² = 1 − Σe² / Σ(y − ȳ_split)²` (empty when the
+split's Y is constant or `n < 2`); adjusted R² (training split only; `p` = predictors for
+MLR/Ridge, components for PLS/PCR); `RMSE = sqrt(mean e²)`; `MAE = mean |e|`;
+**bias = mean(predicted − actual)**; max |e|; RMSE as a percentage of the training standard
+deviation of Y. Residual plots use `actual − predicted`. Residual autocorrelation is over
+consecutive lab samples with ±1.96/√n reference lines. Applicability: training minimum,
+maximum, mean and SD of every feature, and how many validation/test samples fall outside the
+training range.
 
 ## Synthetic example data
 

@@ -32,6 +32,7 @@ from inferential_studio import APP_NAME, __version__
 from inferential_studio.core import synthetic
 from inferential_studio.core.dataset import ProjectData, Severity, SourceData
 from inferential_studio.core.importers import SourceChangedError, import_source, load_project_data
+from inferential_studio.core.models import train_models
 from inferential_studio.core.persistence import PROJECT_EXTENSION, ProjectFileError
 from inferential_studio.core.quality import run_detectors
 from inferential_studio.core.schemas import Project, SchemaError, SourceKind
@@ -43,7 +44,12 @@ from inferential_studio.ui.import_wizard import ImportPlan, ImportWizard
 from inferential_studio.ui.pages.cleaning_page import CleaningPage
 from inferential_studio.ui.pages.eda_page import EdaPage
 from inferential_studio.ui.pages.import_page import ImportPage
+from inferential_studio.ui.pages.model_setup_page import ModelSetupPage
+from inferential_studio.ui.pages.processing_page import ProcessingPage
 from inferential_studio.ui.pages.stage_page import PlaceholderPage, StagePage
+from inferential_studio.ui.pages.training_page import TrainingPage
+from inferential_studio.ui.pages.validation_page import ValidationPage
+from inferential_studio.ui.pages.variables_page import VariablesPage
 from inferential_studio.ui.project_dialog import ProjectSettingsDialog
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.settings_dialog import SettingsDialog
@@ -216,6 +222,18 @@ class MainWindow(QMainWindow):
             elif stage.key == "cleaning":
                 page = CleaningPage(stage, self.session, self.undo_stack, self.settings)
                 page.detection_requested.connect(self.run_detection)
+            elif stage.key == "variables":
+                page = VariablesPage(stage, self.session, self.tasks, self.undo_stack)
+            elif stage.key == "processing":
+                page = ProcessingPage(stage, self.session, self.tasks, self.undo_stack)
+            elif stage.key == "model_setup":
+                page = ModelSetupPage(stage, self.session, self.undo_stack)
+                page.train_requested.connect(self.run_training)
+            elif stage.key == "training":
+                page = TrainingPage(stage, self.session)
+                page.train_requested.connect(self.run_training)
+            elif stage.key == "validation":
+                page = ValidationPage(stage, self.session)
             else:
                 page = PlaceholderPage(stage)
             self.pages[stage.key] = page
@@ -514,6 +532,38 @@ class MainWindow(QMainWindow):
             on_result=done,
             on_error=lambda msg, details: self.show_error("Anomaly detection failed", msg, details),
         )
+
+    # ------------------------------------------------------------------ training
+
+    @Slot()
+    def run_training(self) -> None:
+        """Train every enabled model in the background on the current aligned features."""
+        session = self.session
+        fm = session.features
+        if fm is None:
+            self.show_error(
+                "Cannot train", session.features_error or "The aligned features are not ready yet."
+            )
+            return
+        config = session.project.modelling
+
+        def done(run) -> None:  # noqa: ANN001
+            session.set_training(run)
+            if session.features is not fm or session.project.modelling != config:
+                session._invalidate_training()  # inputs changed while training
+            self.sidebar.setCurrentRow(self._stage_row("training"))
+
+        self.tasks.submit(
+            "Training models",
+            train_models,
+            fm,
+            config,
+            on_result=done,
+            on_error=lambda msg, details: self.show_error("Training failed", msg, details),
+        )
+
+    def _stage_row(self, key: str) -> int:
+        return [s.key for s in STAGES].index(key)
 
     @Slot(str)
     def _remove_source(self, source_id: str) -> None:

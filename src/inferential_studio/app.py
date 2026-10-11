@@ -66,12 +66,38 @@ def main(argv: list[str] | None = None) -> int:
         window.open_project_file(args.project)
 
     if args.smoke_test:
+        _numeric_self_check()
         log.info("Smoke test: main window created; exiting")
         QTimer.singleShot(0, app.quit)
 
     code = app.exec()
     log.info("%s exiting with code %s", APP_NAME, code)
     return int(code)
+
+
+def _numeric_self_check() -> None:
+    """Align and train on a small synthetic dataset (proves the bundled numerics load and run)."""
+    import numpy as np
+    import pandas as pd
+
+    from inferential_studio.core.features import TargetSamples, build_feature_matrix
+    from inferential_studio.core.models import train_models
+    from inferential_studio.core.schemas import FeatureSpec, ModellingConfig
+    from inferential_studio.core.synthetic import SyntheticConfig, generate_distillation_dataset
+
+    ds = generate_distillation_dataset(SyntheticConfig(days=6))
+    lab = ds.lab
+    n = len(lab)
+    target = TargetSamples(
+        "y", pd.DatetimeIndex(lab["Sample_Timestamp"]), lab["Product_Composition"].to_numpy(),
+        np.zeros(n, bool), np.zeros(n, bool),
+    )  # fmt: skip
+    specs = [FeatureSpec(c, deadtime_s=1200) for c in ("Tray_15_Temp", "Column_Pressure")]
+    run = train_models(build_feature_matrix(target, ds.process, specs), ModellingConfig())
+    failed = [m.name for m in run.models if not m.ok] + run.errors
+    if failed:
+        raise RuntimeError(f"Numeric self-check failed: {failed}")
+    logging.getLogger(__name__).info("Smoke test: aligned and trained %d models", len(run.models))
 
 
 if __name__ == "__main__":
