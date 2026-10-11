@@ -3,6 +3,43 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## v0.5.0 — Milestone 5: persistence, reporting and release preparation (2026-10-11)
+
+Release candidate for v1.0.0 (pending the installer test on a clean Windows PC).
+
+### Added
+- **Export & Report page**: HTML model card (self-contained, inline SVG charts, printable to
+  PDF) with summary, data sources and checksums, every exclusion / rule / detector review,
+  feature definitions, equation, coefficients and VIP, metrics and plots per period, training
+  ranges, limitations and provenance; predictions and feature matrix to Excel/CSV; model-card
+  details stored in the project.
+- **Model files (`.imsmodel`)**: plain JSON (no pickle) with feature definitions, coefficients
+  in feature units, training ranges, metrics and provenance; safe loading with format/size
+  checks.
+- **Batch prediction**: apply a saved model to the project's data at the lab sample times
+  (with RMSE/bias against the lab) or on a regular grid; missing/insufficient inputs give no
+  prediction with a reason; extrapolation beyond the training range is flagged; export.
+- **Portable projects** (*File → Save Portable Copy…*): data files embedded and verified by
+  SHA-256 on opening. Project schema 5.
+- **Saved results are reproduced**: projects store a summary of the last training run; on
+  reopening the models are retrained and the pages report whether the results were reproduced.
+  Whether the final test was revealed is remembered.
+- **Crash recovery**: a recovery copy of unsaved work every minute, offered at the next start.
+- **Contextual help**: the right-hand panel shows a short guide for each stage; F1 opens the
+  user guide, methodology and file formats inside the application.
+- **Packaging**: application icon, Inno Setup per-user installer script (Start menu, optional
+  desktop shortcut and `.imsproj` association, uninstaller), installer smoke test script,
+  build-script integration with checksums; `--smoke-test <project>` runs the whole example
+  workflow (load, align, train, write the model card) and fails with a non-zero exit code.
+- Tests: artifacts, exports, report, portable/results/recovery persistence, full GUI workflow,
+  subprocess smoke tests.
+
+### Changed
+- Median and standard-deviation windows are vectorised (about 3× faster alignment, much faster
+  batch prediction on dense grids).
+- The Properties dock became the Help panel; *File → Export…* (Ctrl+E) opens the Export page.
+- pytest dumps all thread stacks if a test hangs for 5 minutes (`faulthandler_timeout`).
+
 ## v0.4.0 — Milestone 4: modelling, interpretation and validation (2026-10-11)
 
 ### Added

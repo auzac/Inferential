@@ -22,8 +22,10 @@ Windows reference PC (spec §12). Re-run with the commands below on that PC and 
 | Detectors: Hampel + flatline on 20 tags (v0.2.0) | 23.5 s | |
 | Exclusion masks: intervals, a 2-condition rule with minimum duration, detector events (v0.2.0) | 0.44 s | |
 | Feature alignment, 20 predictors × 8,332 lab samples, 30-min mean windows (v0.4.0) | 0.66 s | ≈ 380 MB |
-| Same with median windows (per-window loop) (v0.4.0) | 3.3 s | |
+| Same with median windows (v0.4.0 per-window loop → v0.5.0 vectorised) | 3.3 s → 1.0 s | |
 | Training MLR + PLS + PCR + Ridge with 5-fold expanding CV tuning, 8,332 × 20 (v0.4.0) | 1.0 s | |
+| Batch prediction from a model file on a 5-minute grid (200,000 times, 20 tags, 30-min mean windows) (v0.5.0) | 3.4 s | |
+| Same with median windows (v0.5.0) | 8.0 s | |
 
 All of these steps run in background tasks (exclusion masks and feature alignment are
 recomputed automatically and coalesced after edits since v0.2.1 / v0.4.0). Trend charts draw with

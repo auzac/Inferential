@@ -1,8 +1,8 @@
 # User guide
 
-This guide grows with each release. It covers what works in **v0.4.0**: projects, data import,
-raw exploration, cleaning, variable selection, signal processing, model training and
-validation (stages 1–8). Export and reporting (stage 9) arrive in Milestone 5.
+This guide covers **v0.5.0**: all nine stages, from data import to the model card. The **Help**
+panel on the right gives a short guide to the stage on screen; **F1** opens this guide inside
+the application (offline).
 
 ## 1. Start with the example
 
@@ -78,7 +78,7 @@ Statistics are calculated in the background when you open the page. Tick variabl
   correlations come after alignment in Signal Processing.
 
 Raw correlations are often dominated by shutdowns and load changes. They show association, not
-causation — clean the data first (Milestone 2) before choosing predictors.
+causation — clean the data first before choosing predictors.
 
 ## 5. Clean the data (Cleaning & Exclusions)
 
@@ -192,16 +192,37 @@ date until you train again.
 - Prefer a model that is accurate *and* simple, stable and physically sensible. Good fit
   statistics alone do not make a model ready for online use.
 
-## 11. Projects
+## 11. Export and report (Export & Report)
 
-- **Save / Save As** write a `.imsproj` file holding all settings (including target, predictors,
-  feature settings, split and model settings) and references to your data files (with
-  checksums). Trained models are recalculated from these settings; saving fitted models and
-  exporting reports arrive in Milestone 5. Saving is atomic, so an interrupted save cannot damage the previous
-  file. Saving to another folder keeps the data references valid.
-- If a data file has changed since import, opening the project tells you which one and asks
-  whether to accept the new contents.
-- **File → Project Settings…** sets the project name, display timezone and notes.
-- **Tools → Settings…** sets the default display timezone for new projects, your name and the
-  log level. **Tools → Open Log Folder** shows the application logs (no process data values are
-  logged).
+Train first; if settings changed since training, the page asks you to train again so the exports
+match the project.
+
+- **Model card** — choose the model (best ranked first), give a title, model version, owner,
+  purpose and known limitations (kept in the project), then **Save model card (HTML)…**. The
+  card is one self-contained file (no internet, no scripts): summary, data sources with
+  checksums, every exclusion, rule and detector review, the feature definition of every
+  predictor, the equation, coefficients (and VIP for PLS), validation metrics and plots,
+  training ranges, limitations and versions. Open it in any browser; print it to PDF from there.
+  Final-test results appear only after you revealed them on the Validation page and keep
+  *Include final-test results* ticked.
+- **Export predictions…** — one row per evaluated lab sample: sample time in UTC and local
+  time, sample id, period, actual, predicted, residual and the feature values (Excel or CSV).
+- **Export feature matrix…** — every lab sample with its features, eligibility and the reason
+  when it is not usable (for audit).
+- **Save model file (.imsmodel)…** — the model as plain JSON: feature definitions (deadtime,
+  window, filter, coverage rules), intercept and coefficients, training ranges, metrics, data
+  checksums and versions. It contains no executable code, so it is safe to e-mail and open.
+- **Copy equation** — the model as `Y = b0 + b1 × f[X1] + …` on the aligned features, with the
+  caveat that it is exact only when every feature is computed exactly as defined.
+
+### Apply a saved model to data (batch prediction)
+
+**Load model file…**, then **Apply model**. The model's tags must exist in this project (same
+names; units are checked where both sides have them). Choose *at the lab sample times* (compares
+with the lab: RMSE and bias are shown) or *at regular intervals*. Features are rebuilt with the
+model's own definitions and coverage rules: a time whose inputs are missing or excluded gets no
+prediction and the reason is listed; predictions that use inputs outside the training range are
+marked orange (extrapolation). **Export results…** writes the table. To check a model on new
+plant data, import the new files into a project (the same tag names) and apply the model there.
+
+## 12. Projects

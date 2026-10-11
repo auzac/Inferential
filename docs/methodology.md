@@ -244,6 +244,28 @@ consecutive lab samples with ±1.96/√n reference lines. Applicability: trainin
 maximum, mean and SD of every feature, and how many validation/test samples fall outside the
 training range.
 
+## Model files and batch prediction (`core/artifacts.py`)
+
+- A saved model is the list of feature definitions plus `ŷ = b₀ + Σ bⱼ fⱼ` — exact for every
+  v1 model type because each pipeline is affine in its features. No Python objects are stored.
+- **Prediction** rebuilds each feature with the stored definition (cleaning masks of the data
+  it is applied to, resample, trailing filter, window, coverage and gap checks, regime-overlap
+  rule). A time whose inputs fail any check gets **no** prediction and a reason — never a value
+  computed from partial or stale data. Missing tags (or units that differ where both are known)
+  stop the prediction with an error.
+- **Extrapolation**: for each prediction, the features outside the training range
+  (min–max) are listed and counted.
+- Applying a model to the samples it was trained on reproduces its predictions to floating-point
+  precision (tested).
+
+## Reproducibility of saved projects
+
+Alignment, splitting, CV and fitting are deterministic (no random seeds involved: PCA uses the
+full SVD, PLS NIPALS is deterministic). A project saved after training stores a summary of the
+results; on reopening, the models are trained again and compared (coefficients and metrics,
+relative tolerance 10⁻⁶). Differences — e.g. changed data files or library versions — are
+reported, not hidden.
+
 ## Synthetic example data
 
 `inferential_studio.core.synthetic` produces an artificial distillation dataset with recorded
