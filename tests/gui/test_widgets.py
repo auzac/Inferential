@@ -2,12 +2,25 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pyqtgraph as pg
 import pytest
+from pyqtgraph.GraphicsScene.mouseEvents import MouseClickEvent
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtWidgets import QGraphicsSceneMouseEvent
 
+from inferential_studio.ui.widgets.cursor_readout import CursorReadout
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem, format_time, to_epoch_seconds
 from inferential_studio.ui.widgets.trend_view import BINS, MAX_PLOTS, TrendSeries, TrendView
 
 pytestmark = pytest.mark.gui
+
+
+def _click_event(view: TrendView, x: float, button: Qt.MouseButton) -> MouseClickEvent:
+    """A synthetic mouse click on the first plot at time x (press event wrapped by pyqtgraph)."""
+    press = QGraphicsSceneMouseEvent(QEvent.Type.GraphicsSceneMousePress)
+    press.setScenePos(view.plots[0].vb.mapViewToScene(pg.Point(x, 0.0)))
+    press.setButton(button)
+    return MouseClickEvent(press)
 
 
 def test_epoch_seconds_requires_aware_times():
@@ -109,3 +122,74 @@ def test_trend_view_draws_envelope_then_raw_slice(qtbot):
     # Zooming back out restores the envelope.
     plot.setXRange(float(x[0]), float(x[-1]), padding=0)
     assert len(lo_item.xData) == BINS and hi_item.isVisible()
+
+
+def test_trend_view_click_pins_point_and_second_click_unlocks(qtbot):
+    view = TrendView("UTC")
+    qtbot.addWidget(view)
+    x = to_epoch_seconds(pd.date_range("2026-01-01", periods=100, freq="1min", tz="UTC"))
+    view.set_series([TrendSeries("A", x, np.arange(100.0), "degC")])
+    seen: list[tuple[str, dict]] = []
+    cleared: list[int] = []
+    view.point_selected.connect(lambda t, values: seen.append((t, values)))
+    view.point_cleared.connect(lambda: cleared.append(1))
+    view._toggle_point(float(x[10]))
+    assert view._selected_x == float(x[10])
+    assert seen[-1][1] == {"A": "10 degC"}
+    assert view._sel_line_of[view.plots[0]].isVisible()
+    view._toggle_point(float(x[20]))  # a second click anywhere releases the pin
+    assert view._selected_x is None and cleared == [1]
+    assert not view._sel_line_of[view.plots[0]].isVisible()
+    assert len(seen) == 1
+    # Dragging a highlight band also releases the pin.
+    view._toggle_point(float(x[10]))
+    view._set_band(float(x[30]), float(x[40]))
+    assert view._selected_x is None and cleared == [1, 1]
+
+
+def test_trend_view_drag_creates_synced_band(qtbot):
+    view = TrendView("UTC")
+    qtbot.addWidget(view)
+    x = to_epoch_seconds(pd.date_range("2026-01-01", periods=100, freq="1min", tz="UTC"))
+    view.set_series(
+        [TrendSeries("A", x, np.arange(100.0)), TrendSeries("B", x, np.arange(100.0) * 2)]
+    )
+    view._set_band(float(x[5]), float(x[25]))
+    assert len(view._bands) == len(view.plots) == 2
+    for _plot, region in view._bands:
+        assert region.getRegion() == (float(x[5]), float(x[25]))
+    # Moving one band keeps the others in step.
+    view._bands[0][1].setRegion((float(x[8]), float(x[20])))
+    assert all(r.getRegion() == (float(x[8]), float(x[20])) for _plot, r in view._bands)
+    # A click anywhere else removes the highlight.
+    view._click_point(
+        view.plots[0].vb, _click_event(view, float(x[60]), Qt.MouseButton.LeftButton)
+    )
+    assert view._bands == []
+
+
+def test_trend_view_right_click_raises_plot_menu(qtbot, monkeypatch):
+    view = TrendView("UTC")
+    qtbot.addWidget(view)
+    x = to_epoch_seconds(pd.date_range("2026-01-01", periods=100, freq="1min", tz="UTC"))
+    view.set_series([TrendSeries("A", x, np.arange(100.0))])
+    calls: list[Qt.MouseButton] = []
+    monkeypatch.setattr(
+        pg.ViewBox, "raiseContextMenu", lambda self, ev: calls.append(ev.button())
+    )
+    view.plots[0].vb.mouseClickEvent(_click_event(view, float(x[50]), Qt.MouseButton.RightButton))
+    assert calls == [Qt.MouseButton.RightButton]
+
+
+def test_cursor_readout_locks_on_selected_point():
+    box = CursorReadout()
+    assert box.minimumHeight() == box.maximumHeight() == 220  # static, taller than before
+    box.show_hover("t1", {"A": "1"})
+    assert "t1" in box.time_label.text() and box.title() == "At cursor"
+    box.show_point("t2", {"A": "2"})
+    assert box.title() == "Selected point" and "t2" in box.time_label.text()
+    box.show_hover("t3", {"A": "3"})  # ignored while pinned
+    assert "t2" in box.time_label.text() and "t3" not in box.time_label.text()
+    box.unlock()
+    box.show_hover("t3", {"A": "3"})
+    assert box.title() == "At cursor" and "t3" in box.time_label.text()

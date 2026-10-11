@@ -170,6 +170,8 @@ class CleaningPage(StagePage):
         self.trends.rebuilt.connect(self._add_overlays)
         self.cursor = CursorReadout()
         self.trends.hover.connect(self.cursor.show_hover)
+        self.trends.point_selected.connect(self.cursor.show_point)
+        self.trends.point_cleared.connect(self.cursor.unlock)
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)

@@ -3,8 +3,13 @@
 Plots are added and removed one at a time (ticking a variable no longer rebuilds every chart),
 and each line series draws from a precomputed min/max envelope while zoomed out, switching to
 the raw samples of the visible window when zoomed in. The number of plots is capped so panning
-stays fluid on large data. The crosshair emits the values at the cursor through ``hover``; the
-pages show them in the "At cursor" box below the variable selection.
+stays fluid on large data.
+
+The mouse works like a selection tool instead of a pan tool: dragging left-to-right draws a
+full-height highlight band across all charts, clicking pins the values at that point in time
+(emitted through ``point_selected`` / ``point_cleared``), and the hover crosshair keeps
+emitting ``hover`` for the "At cursor" box below the variable selection. The mouse wheel zooms,
+middle-drag pans and right-drag zooms to a box.
 """
 
 from __future__ import annotations
@@ -27,6 +32,8 @@ MAX_PLOTS = 12  # charts shown at once; more than this is slow to pan and hard t
 BINS = 2048  # envelope bins per series: the resolution of the zoomed-out view
 RAW_SPAN_BINS = 8  # zoomed in closer than this many bins: draw the raw samples instead
 POINTS_MAX = 5000  # markers drawn for sparse point series (lab samples)
+HIGHLIGHT_COLOUR = (0, 114, 178)  # drag-to-highlight band, matching the cleaning page's range
+PIN_COLOUR = "#0072B2"  # vertical line marking the pinned point in time
 
 
 @dataclass
@@ -38,12 +45,46 @@ class TrendSeries:
     points: bool = False  # draw as markers (sparse lab samples) instead of a line
 
 
+class _TrendViewBox(pg.ViewBox):
+    """View box where the left button selects instead of panning.
+
+    Left-drag draws a full-height highlight band (handled by the owning
+    :class:`TrendView`), left-click pins the point in time under the mouse, middle-drag
+    pans and right-drag keeps the default zoom-to-box behaviour.
+    """
+
+    def __init__(self, view: TrendView) -> None:
+        super().__init__()
+        self._view = view
+
+    def mouseDragEvent(self, ev, axis=None) -> None:  # noqa: ANN001 - pyqtgraph signature
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self._view._band_drag(self, ev)
+            ev.accept()
+        elif ev.button() == Qt.MouseButton.MiddleButton:
+            self._view._pan_drag(self, ev)
+            ev.accept()
+        else:
+            super().mouseDragEvent(ev, axis)
+
+    def mouseClickEvent(self, ev) -> None:  # noqa: ANN001 - pyqtgraph signature
+        # NOTE: ViewBox.mouseClickEvent takes no axis parameter (0.14); right-click
+        # raises the plot's context menu through it.
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self._view._click_point(self, ev)
+            ev.accept()
+        else:
+            super().mouseClickEvent(ev)
+
+
 class TrendView(QWidget):
     """Stacked or unit-grouped plots sharing one time axis."""
 
     x_range_changed = Signal(float, float)
     rebuilt = Signal()  # plots were added/removed/updated; owners re-add their overlays
     hover = Signal(str, dict)  # (time text, {series name: formatted value}) at the cursor
+    point_selected = Signal(str, dict)  # like hover, but pinned by a click until the next click
+    point_cleared = Signal()
 
     def __init__(self, timezone: str = "UTC", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -56,6 +97,11 @@ class TrendView(QWidget):
         self._plot_by_key: dict[str, pg.PlotItem] = {}
         self._key_of_plot: dict[pg.PlotItem, str] = {}
         self._vline_of: dict[pg.PlotItem, pg.InfiniteLine] = {}
+        self._sel_line_of: dict[pg.PlotItem, pg.InfiniteLine] = {}
+        self._bands: list[tuple[pg.PlotItem, pg.LinearRegionItem]] = []
+        self._band_syncing = False
+        self._drag_x0: float | None = None
+        self._selected_x: float | None = None  # pinned point in time (None while unlocked)
         # group key -> series name -> (line/min item, max item or None, (points, id(x), id(y)))
         self._items: dict[
             str, dict[str, tuple[pg.PlotDataItem, pg.PlotDataItem | None, tuple]]
@@ -72,7 +118,10 @@ class TrendView(QWidget):
         self.mode.setToolTip("Signals with different units always use separate y-axes.")
         self.mode.currentIndexChanged.connect(self._rebuild)
         self.fit_button = QPushButton("Fit all")
-        self.fit_button.setToolTip("Reset zoom to show all data (mouse wheel zooms, drag pans)")
+        self.fit_button.setToolTip(
+            "Reset zoom to show all data "
+            "(wheel zooms, middle-drag pans, drag highlights, click pins a point)"
+        )
         self.fit_button.clicked.connect(self.fit_all)
 
         bar = QHBoxLayout()
@@ -173,7 +222,7 @@ class TrendView(QWidget):
 
     def _make_plot(self, units_label: str) -> pg.PlotItem:
         axis = TzDateAxisItem(self._tz)
-        plot = pg.PlotItem(axisItems={"bottom": axis})
+        plot = pg.PlotItem(viewBox=_TrendViewBox(self), axisItems={"bottom": axis})
         plot.showGrid(x=True, y=True, alpha=0.15)
         plot.getAxis("left").setWidth(AXIS_WIDTH)
         plot.addLegend(offset=(5, 5), labelTextSize="8pt", brush=(255, 255, 255, 210))
@@ -184,6 +233,11 @@ class TrendView(QWidget):
         )
         vline.setVisible(False)
         plot.addItem(vline, ignoreBounds=True)
+        pin = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen(PIN_COLOUR, width=2))
+        pin.setVisible(self._selected_x is not None)
+        if self._selected_x is not None:
+            pin.setPos(self._selected_x)
+        plot.addItem(pin, ignoreBounds=True)
         # Every pan/zoom re-fits this plot's curves to the visible window (cheap: the
         # data comes from the precomputed envelope or a small raw slice).
         plot.vb.sigRangeChanged.connect(
@@ -191,6 +245,7 @@ class TrendView(QWidget):
         )
         self._vlines.append(vline)
         self._vline_of[plot] = vline
+        self._sel_line_of[plot] = pin
         return plot
 
     def _rebuild(self) -> None:
@@ -292,6 +347,8 @@ class TrendView(QWidget):
         self.plots, self._vlines, self._plot_series = [], [], []
         self._plot_keys, self._plot_by_key, self._key_of_plot = [], {}, {}
         self._vline_of = {}
+        self._sel_line_of = {}
+        self._bands = []
         self._items = {}
         self._colours = {}
         self._env_cache = {}
@@ -306,6 +363,8 @@ class TrendView(QWidget):
         del self._plot_series[idx]
         self.plots.remove(plot)
         self._vlines.remove(self._vline_of.pop(plot))
+        self._sel_line_of.pop(plot, None)
+        self._bands = [(p, r) for p, r in self._bands if p is not plot]
         for _name, (lo, hi, _sig) in self._items.pop(key, {}).items():
             plot.removeItem(lo)
             if hi is not None:
@@ -428,7 +487,7 @@ class TrendView(QWidget):
             hi_item.setData(xc, ymax)
             hi_item.setVisible(True)
 
-    # ------------------------------------------------------------------ crosshair
+    # ------------------------------------------------------- crosshair & selection
 
     def _on_mouse(self, event) -> None:  # noqa: ANN001 - pyqtgraph SignalProxy payload
         pos = event[0]
@@ -438,10 +497,8 @@ class TrendView(QWidget):
                 self._show_cursor(x)
                 return
 
-    def _show_cursor(self, x: float) -> None:
-        for line in self._vlines:
-            line.setPos(x)
-            line.setVisible(True)
+    def _values_at(self, x: float) -> tuple[str, dict[str, str]]:
+        """(time text, {series name: formatted value}) of the last sample at or before x."""
         values: dict[str, str] = {}
         for s in self._series:
             i = (
@@ -449,4 +506,95 @@ class TrendView(QWidget):
             )  # last sample at or before the cursor
             if 0 <= i < len(s.y) and np.isfinite(s.y[i]):
                 values[s.name] = f"{s.y[i]:.6g}{' ' + s.units if s.units else ''}"
-        self.hover.emit(format_time(x, self._tz), values)
+        return format_time(x, self._tz), values
+
+    def _show_cursor(self, x: float) -> None:
+        for line in self._vlines:
+            line.setPos(x)
+            line.setVisible(True)
+        self.hover.emit(*self._values_at(x))
+
+    # -- pinned point (left-click) ---------------------------------------------
+
+    def _click_point(self, vb: pg.ViewBox, ev) -> None:  # noqa: ANN001 - pyqtgraph event
+        if self._bands:
+            self._clear_band()  # clicking anywhere else removes the highlight
+            return
+        self._toggle_point(vb.mapSceneToView(ev.scenePos()).x())
+
+    def _toggle_point(self, x: float) -> None:
+        """Pin the values at x; a second click anywhere releases the pin."""
+        if self._selected_x is not None:
+            self._clear_point()
+            return
+        self._selected_x = float(x)
+        for plot in self.plots:
+            line = self._sel_line_of.get(plot)
+            if line is not None:
+                line.setPos(x)
+                line.setVisible(True)
+        self.point_selected.emit(*self._values_at(x))
+
+    def _clear_point(self) -> None:
+        if self._selected_x is None:
+            return
+        self._selected_x = None
+        for plot in self.plots:
+            line = self._sel_line_of.get(plot)
+            if line is not None:
+                line.setVisible(False)
+        self.point_cleared.emit()
+
+    # -- drag-to-highlight band (left-drag) ------------------------------------
+
+    def _band_drag(self, vb: pg.ViewBox, ev) -> None:  # noqa: ANN001 - pyqtgraph event
+        if ev.isStart():
+            self._drag_x0 = vb.mapSceneToView(ev.scenePos()).x()
+        if self._drag_x0 is None:
+            return
+        self._set_band(self._drag_x0, vb.mapSceneToView(ev.scenePos()).x())
+        if ev.isFinish():
+            self._drag_x0 = None
+
+    def _set_band(self, x0: float, x1: float) -> None:
+        """Full-height highlight from x0 to x1 on every plot (kept in sync)."""
+        if self._selected_x is not None:
+            self._clear_point()  # a new drag replaces the pinned point
+        lo, hi = sorted((float(x0), float(x1)))
+        if not self._bands:
+            for plot in self.plots:
+                region = pg.LinearRegionItem(
+                    values=(lo, hi), brush=pg.mkBrush(*HIGHLIGHT_COLOUR, 40), movable=True
+                )
+                region.setZValue(5)
+                region.sigRegionChanged.connect(self._band_moved)
+                plot.addItem(region, ignoreBounds=True)
+                self._bands.append((plot, region))
+        else:
+            self._bands[0][1].setRegion((lo, hi))  # syncs the rest through _band_moved
+
+    def _band_moved(self, region: pg.LinearRegionItem) -> None:
+        if self._band_syncing:
+            return
+        self._band_syncing = True
+        rng = tuple(region.getRegion())
+        for _plot, other in self._bands:
+            if other is not region:
+                other.setRegion(rng)
+        self._band_syncing = False
+
+    def _clear_band(self) -> None:
+        for plot, region in self._bands:
+            if region.scene() is not None:
+                plot.removeItem(region)
+        self._bands = []
+
+    # -- pan (middle-drag) -----------------------------------------------------
+
+    def _pan_drag(self, vb: pg.ViewBox, ev) -> None:  # noqa: ANN001 - pyqtgraph event
+        p0 = vb.mapSceneToView(ev.lastPos())
+        p1 = vb.mapSceneToView(ev.pos())
+        dx, dy = p1.x() - p0.x(), p1.y() - p0.y()
+        x0, x1 = vb.viewRange()[0]
+        y0, y1 = vb.viewRange()[1]
+        vb.setRange(xRange=(x0 - dx, x1 - dx), yRange=(y0 - dy, y1 - dy), padding=0)

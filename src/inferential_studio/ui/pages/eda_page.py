@@ -128,6 +128,8 @@ class EdaPage(StagePage):
         self.tabs = QTabWidget()
         self.trends = TrendView(session.project.display_timezone)
         self.trends.hover.connect(self.cursor.show_hover)
+        self.trends.point_selected.connect(self.cursor.show_point)
+        self.trends.point_cleared.connect(self.cursor.unlock)
         self.tabs.addTab(self.trends, "Trends")
 
         self.stats_table = DataTableView()

@@ -57,10 +57,14 @@ Statistics are calculated in the background when you open the page. Tick variabl
 (use the filter box when there are many tags).
 
 - **Trends** — one plot per signal or grouped by units, on a shared time axis in the project's
-  display timezone. Mouse wheel zooms, drag pans, **Fit all** resets. Hovering shows the values
-  at the cursor in the *At cursor* box below the variable list, one line per signal (the last
-  sample at or before it; nothing is shown inside gaps). Lab samples appear as markers.
-  Right-click a plot → *Export* to save it as an image.
+  display timezone. The mouse wheel zooms, middle-drag pans, right-drag zooms to a box and
+  **Fit all** resets. Drag left-to-right to highlight a time range across every chart (click
+  anywhere else to remove it); click a point to pin its values — the readout below the
+  variable list switches to *Selected point* and stays there until you click again. While
+  unpinned, hovering shows the values at the
+  cursor in the *At cursor* box, one line per signal (the last sample at or before it; nothing
+  is shown inside gaps). Lab samples appear as markers. Right-click a plot → *Export* to save
+  it as an image.
 - **Statistics** — count, valid/missing/invalid %, quartiles, mean, std, variance, CV,
   skewness, excess kurtosis. Sort by clicking a column header.
 - **Correlation** — Pearson or Spearman heatmap, optional |r| and grouping of similar

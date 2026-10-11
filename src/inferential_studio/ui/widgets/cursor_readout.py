@@ -3,6 +3,9 @@
 The text lives inside a scroll area and the box has a fixed height, so long
 values or many checked variables never change its size hint: the surrounding
 layout (and therefore the charts) stays put no matter what is hovered.
+
+Clicking a trend pins the readout ("Selected point") until the next click;
+while pinned, hover updates are ignored.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ class CursorReadout(QGroupBox):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("At cursor", parent)
+        self._locked = False
         self.time_label = QLabel("Move the mouse over a trend to read its values here.")
         self.time_label.setWordWrap(True)
         self.values_label = QLabel(" ")
@@ -48,11 +52,26 @@ class CursorReadout(QGroupBox):
         layout.addWidget(self._scroll, 1)
 
         # Static box: content grows inside the scroll area, never the group.
-        self.setFixedHeight(150)
+        self.setFixedHeight(220)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
 
     def show_hover(self, time_text: str, values: dict[str, str]) -> None:
-        """Display the values of all series at the hovered time."""
+        """Display the values of all series at the hovered time (ignored while pinned)."""
+        if self._locked:
+            return
+        self._show(time_text, values)
+
+    def show_point(self, time_text: str, values: dict[str, str]) -> None:
+        """Pin the readout to a clicked point in time until :meth:`unlock`."""
+        self._locked = True
+        self.setTitle("Selected point")
+        self._show(time_text, values)
+
+    def unlock(self) -> None:
+        self._locked = False
+        self.setTitle("At cursor")
+
+    def _show(self, time_text: str, values: dict[str, str]) -> None:
         self.time_label.setText(f"<b>{time_text}</b>")
         if values:
             self.values_label.setText(

@@ -3,6 +3,26 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## v0.2.2 — Trend selection interactions (2026-10-11)
+
+### Added
+- Clicking a trend pins the values at that point in time: the readout retitles to "Selected
+  point" and stays locked until the next click (a new drag also releases it).
+- Dragging left-to-right on a trend draws a full-height highlight band across every chart,
+  the same look as the cleaning page's "Select range" regions (bands stay in sync and can be
+  adjusted by dragging; clicking anywhere else removes the highlight).
+
+### Changed
+- Panning is no longer the default mouse action on trends: the mouse wheel zooms, middle-drag
+  pans and right-drag zooms to a box.
+- The "At cursor" readout is taller and ignores hover while a point is pinned.
+- User guide: trends section updated for the new mouse behaviour.
+
+### Fixed
+- Right-clicking a trend opens the plot menu (View All, axes, Mouse Mode, Plot Options,
+  Export...) again: the menu path crashed under pyqtgraph 0.14 because the view box passed an
+  argument the click handler does not take.
+
 ## v0.2.1 — Performance: large-data responsiveness (2026-10-11)
 
 ### Added
