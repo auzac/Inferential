@@ -101,6 +101,9 @@ class DataTableView(QTableView):
             proxy.setSourceModel(self.model_)
             proxy.setSortRole(Qt.ItemDataRole.UserRole)
             self.setModel(proxy)
+            # No initial sort: rows keep the order of the frame (e.g. a ranking) until the
+            # user clicks a column header.
+            self.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
             self.setSortingEnabled(True)
         else:
             self.setModel(self.model_)

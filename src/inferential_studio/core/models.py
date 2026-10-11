@@ -339,7 +339,7 @@ class ModelResult:
     intercept: float = np.nan
     coefficients: pd.Series | None = None  # original units of X and y
     standardized: pd.Series | None = None
-    predictions: pd.DataFrame | None = None  # sample_time, split, actual, predicted, residual
+    predictions: pd.DataFrame | None = None  # row, sample_time, split, actual, predicted, residual
     metrics: pd.DataFrame | None = None  # index = split
     details: PlsDetails | PcrDetails | None = None
     warnings: list[str] = field(default_factory=list)
@@ -369,6 +369,7 @@ class TrainingRun:
     config: ModellingConfig
     split: SplitResult
     sample_time: pd.DatetimeIndex  # every feature-matrix row
+    feature_values: pd.DataFrame  # the aligned features of every row (same order)
     models: list[ModelResult]
     problems: list[Problem]
     train_ranges: pd.DataFrame  # per feature: min, max, mean, std (training samples)
@@ -483,6 +484,7 @@ def train_models(
         config=config,
         split=split,
         sample_time=fm.sample_time,
+        feature_values=fm.X.copy(),
         models=[],
         problems=problems,
         train_ranges=stats,
@@ -603,6 +605,7 @@ def _train_one(
     pred[use] = _predict(pipe, X_all[use])
     result.predictions = pd.DataFrame(
         {
+            "row": np.flatnonzero(use),  # row of the feature matrix
             "sample_time": times[use],
             "split": labels[use],
             "actual": y_all[use],

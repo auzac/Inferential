@@ -1,4 +1,4 @@
-"""Undoable edits. Cleaning edits replace whole project lists, so undo/redo is exact and simple."""
+"""Undoable edits. Edits replace whole project lists or configurations, so undo/redo is exact."""
 
 from __future__ import annotations
 
@@ -23,10 +23,14 @@ class ReplaceListsCommand(QUndoCommand):
         self._session.set_lists(**self._before)
 
 
-def edit_lists(stack: QUndoStack, session: ProjectSession, text: str, **after: list) -> None:
-    """Apply a change to one or more cleaning lists as a single undo step."""
+def _copy(value: object) -> object:
+    return list(value) if isinstance(value, list) else value
+
+
+def edit_lists(stack: QUndoStack, session: ProjectSession, text: str, **after: object) -> None:
+    """Apply a change to project lists or configurations as a single undo step."""
     project = session.project
-    before = {name: list(getattr(project, name)) for name in after}
-    if all(list(after[name]) == before[name] for name in after):
+    before = {name: _copy(getattr(project, name)) for name in after}
+    if all(_copy(after[name]) == before[name] for name in after):
         return  # nothing changed: keep the undo history clean
-    stack.push(ReplaceListsCommand(session, text, before, {k: list(v) for k, v in after.items()}))
+    stack.push(ReplaceListsCommand(session, text, before, {k: _copy(v) for k, v in after.items()}))

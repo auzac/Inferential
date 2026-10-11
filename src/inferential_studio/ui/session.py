@@ -12,9 +12,18 @@ from PySide6.QtCore import QObject, Signal
 
 from inferential_studio.core.dataset import ProjectData, SourceData
 from inferential_studio.core.exclusions import CleaningState, compute_cleaning
+from inferential_studio.core.features import AlignmentError, FeatureMatrix, build_project_features
+from inferential_studio.core.models import TrainingRun
 from inferential_studio.core.persistence import load_project, rebase_source_paths, save_project
 from inferential_studio.core.quality import DetectorResult
-from inferential_studio.core.schemas import DataSource, Project, SourceKind, VariableMeta
+from inferential_studio.core.schemas import (
+    DataSource,
+    FeatureSpec,
+    Project,
+    SourceKind,
+    VariableMeta,
+    VariableRole,
+)
 
 if TYPE_CHECKING:
     from inferential_studio.infrastructure.workers import TaskManager
@@ -34,6 +43,16 @@ def _compute_cleaning_task(
     return compute_cleaning(project, frame, text_mask, detector_results, target)
 
 
+def _build_features_task(
+    project: Project,
+    data: ProjectData,
+    frame: pd.DataFrame,
+    cleaning: CleaningState | None,
+    **task_kwargs: object,
+) -> FeatureMatrix:
+    return build_project_features(project, data, frame, cleaning, **task_kwargs)
+
+
 class ProjectSession(QObject):
     changed = Signal()  # project configuration replaced or edited
     data_changed = Signal()  # imported data added, removed or reloaded
@@ -41,9 +60,15 @@ class ProjectSession(QObject):
     path_changed = Signal(object)  # Path | None
     cleaning_changed = Signal()  # exclusion masks recomputed
     detectors_changed = Signal()  # detector configuration edited: results must be recomputed
+    inputs_changed = Signal()  # predictors, feature settings or alignment options edited
+    modelling_changed = Signal()  # model / split configuration edited
+    features_changed = Signal()  # aligned feature matrix recomputed (or failed: see features_error)
+    training_changed = Signal()  # a training run finished or was invalidated
 
-    # Project list attributes that cleaning edits replace wholesale (undo-friendly).
+    # Project attributes that undoable edits replace wholesale.
     CLEANING_LISTS = ("exclusions", "rules", "detectors", "flag_decisions")
+    INPUT_LISTS = ("variables", "features")
+    CONFIGS = ("alignment", "modelling")
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -59,6 +84,14 @@ class ProjectSession(QObject):
         self._tasks: TaskManager | None = None  # attached by the main window
         self._cleaning_running = False
         self._cleaning_serial = 0  # bumped on every recompute request; stale results are dropped
+        self.features: FeatureMatrix | None = None
+        self.features_error: str | None = None
+        self._features_running = False
+        self._features_serial = 0
+        self.training: TrainingRun | None = None
+        self.training_stale = False  # inputs changed since the run: results kept but marked
+        self.test_revealed = False  # the user chose to look at final-test results of this run
+        self.cleaning_changed.connect(self.recompute_features)
 
     # ------------------------------------------------------------------ state
 
@@ -123,21 +156,55 @@ class ProjectSession(QObject):
             self._frame_cache = cache
         return cache[1], cache[2], cache[3]
 
-    def set_lists(self, **lists: list) -> None:
-        """Replace whole project lists (used by undoable cleaning edits)."""
-        detectors_before = list(self._project.detectors)
-        unknown = set(lists) - set(self.CLEANING_LISTS)
+    def set_lists(self, **lists: object) -> None:
+        """Replace whole project attributes (used by undoable edits)."""
+        allowed = set(self.CLEANING_LISTS) | set(self.INPUT_LISTS) | set(self.CONFIGS)
+        unknown = set(lists) - allowed
         if unknown:
             raise ValueError(f"{sorted(unknown)} cannot be edited this way.")
-        replace(
-            self._project, **{k: list(v) for k, v in lists.items()}
-        )  # validates; raises before any change
-        for name, value in lists.items():
-            setattr(self._project, name, list(value))
+        project = self._project
+        detectors_before = list(project.detectors)
+        target_before = project.target.name if project.target else None
+        values = {k: (list(v) if isinstance(v, (list, tuple)) and k != "modelling" else v)
+                  for k, v in lists.items()}  # fmt: skip
+        replace(project, **values)  # validates; raises before any change
+        for name, value in values.items():
+            setattr(project, name, value)
         self.mark_dirty()
+        if "variables" in lists:
+            target_after = project.target.name if project.target else None
+            if target_after != target_before:
+                self._bump_data()  # a new target: target masks, detectors, statistics change
+                return
         if "detectors" in lists and lists["detectors"] != detectors_before:
             self.detectors_changed.emit()
-        self.recompute_cleaning()
+        if set(lists) & set(self.CLEANING_LISTS):
+            self.recompute_cleaning()
+        if set(lists) & {"variables", "features", "alignment"}:
+            self.inputs_changed.emit()
+            self.recompute_features()
+        if "modelling" in lists:
+            self.modelling_changed.emit()
+            self._invalidate_training()
+
+    def model_inputs(self, target: str | None, predictors: list[str]) -> dict[str, list]:
+        """Variables and features lists for a new target / predictor choice (not applied)."""
+        project = self._project
+        chosen = set(predictors) - ({target} if target else set())
+        variables = []
+        for v in project.variables:
+            role = (
+                VariableRole.TARGET
+                if v.name == target
+                else VariableRole.PREDICTOR
+                if v.name in chosen
+                else VariableRole.UNUSED
+            )
+            variables.append(replace(v, role=role))
+        kept = {f.variable: f for f in project.features}
+        features = [kept.get(name, FeatureSpec(name)) for name in
+                    (v.name for v in variables if v.role is VariableRole.PREDICTOR)]  # fmt: skip
+        return {"variables": variables, "features": features}
 
     def set_detector_results(
         self, results: dict[tuple[str, str], DetectorResult], version: int
@@ -215,6 +282,88 @@ class ProjectSession(QObject):
     def _on_cleaning_cancelled(self, serial: int) -> None:
         self._cleaning_running = False
         # No rerun: cancellation happens when the app is shutting down.
+
+    # ------------------------------------------------------------------ aligned features
+
+    def recompute_features(self) -> None:
+        """Rebuild the aligned feature matrix (background, coalesced like cleaning)."""
+        self._features_serial += 1
+        self._invalidate_training()
+        project = self._project
+        frame, _mask, _target = self.frames()
+        if frame.empty or project.target is None or not project.predictors:
+            self.features = None
+            self.features_error = (
+                "Import process and lab data first."
+                if frame.empty
+                else "Choose a target variable."
+                if project.target is None
+                else "Choose at least one predictor."
+            )
+            self.features_changed.emit()
+            return
+        if self.cleaning is None:
+            return  # cleaning is being recomputed; features follow when it is done
+        if self._tasks is None:
+            self._features_now()
+        else:
+            self._start_features_task()
+
+    def _features_now(self) -> None:
+        frame, _mask, _target = self.frames()
+        try:
+            self.features = build_project_features(self._project, self._data, frame, self.cleaning)
+            self.features_error = None
+        except AlignmentError as exc:
+            self.features, self.features_error = None, str(exc)
+        self.features_changed.emit()
+
+    def _start_features_task(self) -> None:
+        if self._features_running or self._tasks is None:
+            return
+        self._features_running = True
+        serial = self._features_serial
+        frame, _mask, _target = self.frames()
+        self._tasks.submit(
+            "Aligning features",
+            _build_features_task,
+            replace(  # snapshot: later edits do not race the worker
+                self._project,
+                variables=list(self._project.variables),
+                features=list(self._project.features),
+            ),
+            self._data,
+            frame,
+            self.cleaning,
+            on_result=lambda fm, s=serial: self._on_features_done(fm, None, s),
+            on_error=lambda msg, _d, s=serial: self._on_features_done(None, msg, s),
+            on_cancelled=lambda: setattr(self, "_features_running", False),
+        )
+
+    def _on_features_done(self, fm: FeatureMatrix | None, error: str | None, serial: int) -> None:
+        self._features_running = False
+        if serial != self._features_serial:
+            self._start_features_task()
+            return
+        self.features, self.features_error = fm, error
+        self.features_changed.emit()
+
+    # ------------------------------------------------------------------ training
+
+    def set_training(self, run: TrainingRun) -> None:
+        self.training = run
+        self.training_stale = False
+        self.test_revealed = False
+        self.training_changed.emit()
+
+    def reveal_test(self) -> None:
+        self.test_revealed = True
+        self.training_changed.emit()
+
+    def _invalidate_training(self) -> None:
+        if self.training is not None and not self.training_stale:
+            self.training_stale = True
+            self.training_changed.emit()
 
     # ------------------------------------------------------------------ data
 
@@ -302,6 +451,9 @@ class ProjectSession(QObject):
 
     def _replace(self, project: Project, path: Path | None) -> None:
         self._project = project
+        self.training = None
+        self.training_stale = False
+        self.test_revealed = False
         self._path = path
         self._data = ProjectData()
         self.path_changed.emit(path)
@@ -314,6 +466,9 @@ class ProjectSession(QObject):
         self.detector_results = {}
         self._cleaning_serial += 1  # discard any in-flight cleaning computation
         self.cleaning = None  # the old masks do not match the new data
+        self._features_serial += 1  # and neither do the aligned features
+        self.features = None
+        self._invalidate_training()
         self.data_changed.emit()
         self.recompute_cleaning()
 
