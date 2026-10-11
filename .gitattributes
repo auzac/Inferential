@@ -1,0 +1,10 @@
+# Keep line endings stable so source-file checksums recorded in the sample project still match
+# after a Windows checkout (core.autocrlf would otherwise rewrite the CSV).
+* text=auto eol=lf
+*.ps1 text eol=crlf
+examples/** -text
+*.csv -text
+*.xlsx binary
+*.imsproj binary
+*.png binary
+*.ico binary
