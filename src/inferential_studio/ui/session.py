@@ -303,7 +303,11 @@ class ProjectSession(QObject):
             self.features_changed.emit()
             return
         if self.cleaning is None:
-            return  # cleaning is being recomputed; features follow when it is done
+            if not self._cleaning_running:  # cleaning failed: do not align without exclusions
+                self.features = None
+                self.features_error = "Exclusions could not be computed; see the application log."
+                self.features_changed.emit()
+            return  # otherwise cleaning is being recomputed; features follow when it is done
         if self._tasks is None:
             self._features_now()
         else:

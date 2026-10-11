@@ -25,6 +25,8 @@ production release is `v1.0.0`.
   stay hidden until explicitly revealed, with a warning about exploratory reuse.
 - Core: `splits.py`, `models.py`; schema 4 stores the modelling configuration (v3 files open
   with defaults). Methodology, user guide and benchmarks updated.
+- `--smoke-test` also aligns and trains all four model types on a small synthetic dataset, so
+  a packaged build with missing numerical libraries fails its build check.
 
 ## v0.3.0 — Milestone 3: variable diagnostics and time processing (2026-10-11)
 
@@ -47,7 +49,9 @@ production release is `v1.0.0`.
   deadtime recovery, determinism, end-to-end save/reopen reproducibility.
 
 ### Changed
-- Tables keep the order of their data (e.g. rankings) until a column header is clicked.
+- Tables keep the order of their data (e.g. rankings) until a column header is clicked, and
+  long tables fill much faster (cells read from column arrays; column widths measured on the
+  first 200 rows).
 - Timestamp conversion to nanoseconds is much faster on large indexes (benefits rules,
   exclusions and alignment).
 

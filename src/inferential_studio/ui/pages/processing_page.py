@@ -294,7 +294,9 @@ class ProcessingPage(StagePage):
         self.tabs.addTab(cov, "Coverage report")
 
         self.samples_table = DataTableView()
+        self._samples_version: object = None  # feature matrix shown in the table
         self.tabs.addTab(self.samples_table, "Feature matrix")
+        self.tabs.currentChanged.connect(lambda _i: self._fill_samples())
 
         self.status = note_label()
         self.causal_banner = QLabel()
@@ -520,13 +522,21 @@ class ProcessingPage(StagePage):
         )
         self.coverage_note.setText(" ".join(fm.notes))
         self.coverage_table.set_frame(fm.coverage_report(), COVERAGE_HEADERS)
-        self.samples_table.set_frame(fm.table())
+        self._fill_samples()
         self.sample_spin.blockSignals(True)
         self.sample_spin.setRange(1, max(len(fm.y), 1))
         self.sample_spin.blockSignals(False)
         self._sample = min(self._sample, max(len(fm.y) - 1, 0))
         self._update_counts()
         self._preview_timer.start()
+
+    def _fill_samples(self) -> None:
+        """The per-sample table is long: fill it only while its tab is open."""
+        fm = self._session.features
+        if self.tabs.currentWidget() is not self.samples_table or fm is self._samples_version:
+            return
+        self._samples_version = fm
+        self.samples_table.set_frame(fm.table() if fm is not None else pd.DataFrame())
 
     @Slot(int)
     def _sample_changed(self, value: int) -> None:

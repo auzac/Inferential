@@ -35,6 +35,7 @@ class DataFrameModel(QAbstractTableModel):
     ) -> None:
         super().__init__(parent)
         self._frame = pd.DataFrame()
+        self._columns: list[np.ndarray] = []  # column values as arrays: fast cell access
         self._headers = headers or {}
         self._row_colours: dict[int, QColor] = {}
         if frame is not None:
@@ -43,6 +44,7 @@ class DataFrameModel(QAbstractTableModel):
     def set_frame(self, frame: pd.DataFrame, headers: dict[str, str] | None = None) -> None:
         self.beginResetModel()
         self._frame = frame
+        self._columns = [frame.iloc[:, j].to_numpy() for j in range(frame.shape[1])]
         if headers is not None:
             self._headers = headers
         self._row_colours = {}
@@ -64,7 +66,7 @@ class DataFrameModel(QAbstractTableModel):
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
-        value = self._frame.iat[index.row(), index.column()]
+        value = self._columns[index.column()][index.row()]
         if role == Qt.ItemDataRole.DisplayRole:
             return format_value(value)
         if role == Qt.ItemDataRole.UserRole:  # sort key
@@ -111,6 +113,8 @@ class DataTableView(QTableView):
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.verticalHeader().setDefaultSectionSize(22)
+        # Size columns from the first rows only: measuring every cell of a long table is slow.
+        self.horizontalHeader().setResizeContentsPrecision(200)
 
     def set_frame(self, frame: pd.DataFrame, headers: dict[str, str] | None = None) -> None:
         self.model_.set_frame(frame, headers)
