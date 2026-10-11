@@ -268,6 +268,7 @@ class FeatureMatrix:
     result_time: pd.DatetimeIndex | None = None
     sample_id: np.ndarray | None = None
     notes: list[str] = field(default_factory=list)
+    alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
 
     @property
     def features(self) -> list[str]:
@@ -424,6 +425,7 @@ def build_feature_matrix(
         result_time=target.result_times[order] if target.result_times is not None else None,
         sample_id=target.sample_ids[order] if target.sample_ids is not None else None,
         notes=notes,
+        alignment=alignment,
     )
 
 
