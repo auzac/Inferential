@@ -393,3 +393,34 @@ def test_flow_row_reserves_its_wrapped_height(qtbot):
     buttons = row.findChildren(QPushButton)
     assert len({b.y() for b in buttons}) > 1  # wrapped onto several lines
     assert all(b.geometry().bottom() <= row.height() for b in buttons)  # none spills out
+
+
+def test_value_axis_never_draws_overlapping_labels(qtbot):
+    from PySide6.QtGui import QImage, QPainter
+
+    from inferential_studio.ui.widgets.plots import ValueAxis, plot_widget
+
+    widget = plot_widget()
+    qtbot.addWidget(widget)
+    widget.plot([0, 1], [-44, 358])
+    widget.resize(400, 60)  # a stacked-trend sized chart: ~38 px of axis for four ticks
+    widget.show()
+    qtbot.waitExposed(widget)
+    widget.setYRange(-44, 358, padding=0)
+    qtbot.wait(50)
+    axis = widget.getAxis("left")
+    assert isinstance(axis, ValueAxis)
+
+    def label_rects(generate) -> list:
+        image = QImage(10, 10, QImage.Format.Format_ARGB32)
+        painter = QPainter(image)
+        _, _, texts = generate(painter)
+        painter.end()
+        return [spec[0] for spec in texts]
+
+    def overlapping(rects: list) -> bool:
+        return any(a.intersects(b) for i, a in enumerate(rects) for b in rects[i + 1 :])
+
+    assert overlapping(label_rects(lambda p: pg.AxisItem.generateDrawSpecs(axis, p)))
+    rects = label_rects(axis.generateDrawSpecs)
+    assert rects and not overlapping(rects)  # still labelled, nothing on top of each other

@@ -7,6 +7,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QComboBox, QDialog, QTextBrowser, QVBoxLayout, QWidget
 
 from inferential_studio.infrastructure.paths import resource_path
+from inferential_studio.ui.theme import TOKENS
 
 STAGE_HELP: dict[str, str] = {
     "import": """
@@ -18,7 +19,7 @@ recognises the type from your choices.</p>
 <ul><li>The wizard detects the timestamp format; ambiguous dates (e.g. 03/04) must be confirmed.</li>
 <li>Set the timezone the file was written in. Everything is stored in UTC.</li>
 <li>Check the validation report for gaps, duplicates and text cells.</li></ul>
-<p>New here? <i>Help → Generate Example Dataset</i> creates a complete artificial project.</p>""",
+<p>New here? <i>Menu (≡) → Help → Generate example dataset</i> creates a complete artificial project.</p>""",
     "initial_eda": """
 <h3>Initial EDA</h3>
 <p>Look at the <b>raw</b> data before changing anything: trends, statistics, correlations,
@@ -75,7 +76,7 @@ PDF from a browser.</li>
 <li><b>Predictions</b>: per lab sample, Excel or CSV. <b>Feature matrix</b>: for audit.</li>
 <li><b>Model file</b> (.imsmodel): plain JSON, safe to share; apply it to new data below.</li>
 <li>The equation is valid only with the same feature processing.</li>
-<li><b>File → Save Portable Copy</b> puts the data inside the project file.</li></ul>""",
+<li><b>Menu (≡) → Save portable copy</b> puts the data inside the project file.</li></ul>""",
 }
 
 
@@ -94,10 +95,16 @@ class HelpPanel(QTextBrowser):
         )
 
     def show_stage(self, key: str) -> None:
+        self._key = key
+        muted = TOKENS["text_muted"]
         self.setHtml(
             STAGE_HELP.get(key, "")
-            + "<p style='color:#596675'><i>Press F1 for the full user guide.</i></p>"
+            + f"<p style='color:{muted}'><i>Press F1 for the full user guide.</i></p>"
         )
+
+    def apply_theme(self) -> None:
+        if getattr(self, "_key", None):
+            self.show_stage(self._key)
 
 
 DOCUMENTS = {

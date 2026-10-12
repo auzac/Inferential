@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from zoneinfo import available_timezones
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QCompleter,
     QDialog,
@@ -17,7 +19,9 @@ from PySide6.QtWidgets import (
 )
 
 from inferential_studio.core.schemas import SchemaError, validate_timezone
-from inferential_studio.infrastructure.settings import LOG_LEVELS, AppSettings
+from inferential_studio.infrastructure.settings import LOG_LEVELS, THEME_SETTINGS, AppSettings
+
+THEME_LABELS = {"auto": "Follow Windows", "light": "Light", "dark": "Dark"}
 
 
 class SettingsDialog(QDialog):
@@ -46,6 +50,19 @@ class SettingsDialog(QDialog):
         self.log_level.addItems(LOG_LEVELS)
         self.log_level.setCurrentText(settings.log_level)
 
+        self.theme = QComboBox()
+        for value in THEME_SETTINGS:
+            self.theme.addItem(THEME_LABELS[value], value)
+        self.theme.setCurrentIndex(max(self.theme.findData(settings.theme), 0))
+        self.theme.setToolTip("The switch in the title bar changes it too.")
+
+        self.system_title_bar = QCheckBox("Use the system title bar (after a restart)")
+        self.system_title_bar.setChecked(settings.system_title_bar)
+        self.system_title_bar.setToolTip(
+            "Show the standard Windows frame above the application's own title bar, "
+            "for example with screen readers or window-management tools."
+        )
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -56,6 +73,8 @@ class SettingsDialog(QDialog):
         form.addRow("Display timezone:", self.timezone)
         form.addRow("Your name:", self.author)
         form.addRow("Log level:", self.log_level)
+        form.addRow("Theme:", self.theme)
+        form.addRow("", self.system_title_bar)
         form.addRow(buttons)
 
     def accept(self) -> None:
@@ -67,10 +86,13 @@ class SettingsDialog(QDialog):
         super().accept()
 
     def result_settings(self) -> AppSettings:
-        return AppSettings(
+        """The settings as edited; everything the dialog does not show is kept."""
+        return replace(
+            self._settings,
+            recent_projects=list(self._settings.recent_projects),
             display_timezone=self.timezone.currentText().strip(),
             log_level=self.log_level.currentText(),
-            recent_projects=list(self._settings.recent_projects),
-            last_directory=self._settings.last_directory,
             author_name=self.author.text().strip(),
+            theme=self.theme.currentData(),
+            system_title_bar=self.system_title_bar.isChecked(),
         )

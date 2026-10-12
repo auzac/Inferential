@@ -105,7 +105,7 @@ class ImportPage(StagePage):
         intro = QLabel(
             "Generate an artificial distillation-column dataset (1-minute process data plus "
             "2-hourly lab samples) with a matching sample project. All values are synthetic. "
-            "Also available later from Help → Generate Example Dataset."
+            "Also available later from the menu (≡) → Help → Generate example dataset."
         )
         intro.setWordWrap(True)
         self.generate_button = QPushButton("Generate example dataset…")
@@ -186,6 +186,11 @@ class ImportPage(StagePage):
             ids = [s.source_id for s in project.sources]
             self.sources.selectRow(ids.index(selected) if selected in ids else 0)
         self._show_issues()
+
+    def apply_theme(self) -> None:
+        self._icons = {lvl: level_icon(lvl) for lvl in Level}
+        self._ok_icon = ok_icon()
+        self.refresh()
 
     def selected_source_id(self) -> str | None:
         rows = self.sources.selectionModel().selectedRows() if self.sources.selectionModel() else []

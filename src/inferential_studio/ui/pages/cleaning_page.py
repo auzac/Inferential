@@ -62,13 +62,14 @@ from inferential_studio.ui.widgets.cursor_readout import CursorReadout
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.flow_layout import flow_row
 from inferential_studio.ui.widgets.overlays import IntervalShade, mask_spans
+from inferential_studio.ui.widgets.plots import ORANGE, VERMILION
 from inferential_studio.ui.widgets.time_axis import to_epoch_seconds
 from inferential_studio.ui.widgets.trend_view import TrendSeries, TrendView
 from inferential_studio.ui.widgets.variable_list import VariableList
 
 REGIME_COLOUR = "#7a7a7a"
-VARIABLE_COLOUR = "#E69F00"
-PENDING_COLOUR = "#D55E00"
+VARIABLE_COLOUR = ORANGE
+PENDING_COLOUR = VERMILION
 MARKER_LIMIT = 5000
 STATUS_LABELS = {
     EventStatus.PENDING: "Pending review",
@@ -591,7 +592,7 @@ class CleaningPage(StagePage):
         self._regions = []
         for plot in self.trends.plots:
             region = pg.LinearRegionItem(
-                values=self._selection, brush=pg.mkBrush(0, 114, 178, 40), movable=True
+                values=self._selection, brush=pg.mkBrush(47, 143, 216, 40), movable=True
             )
             region.setZValue(10)
             region.sigRegionChanged.connect(self._region_moved)

@@ -68,7 +68,7 @@ def test_window_remembers_size_and_help_panel(qtbot, monkeypatch):
     monkeypatch.setattr(first, "maybe_save", lambda: True)
     # The offscreen test screen is narrow: the help panel starts closed, the toggle says so.
     assert first.properties_dock.isHidden() and not first.act_help_panel.isChecked()
-    assert first.help_panel_button.defaultAction() is first.act_help_panel
+    assert first.title_bar.help_button.defaultAction() is first.act_help_panel
     first.show()
     first.act_help_panel.trigger()  # the user opens it
     first.resize(960, 690)
@@ -89,28 +89,38 @@ def test_new_project_uses_display_timezone_from_settings(window):
     assert window.session.project.display_timezone == "Asia/Singapore"
 
 
-def test_frequent_actions_live_on_menu_bar_not_toolbar(window):
-    from PySide6.QtWidgets import QToolBar, QToolButton
+def test_title_bar_replaces_menu_bar_and_toolbar(window):
+    from PySide6.QtWidgets import QMenuBar, QToolBar
 
-    # One command row: the frequent actions sit on the menu bar's right end
-    # instead of a separate toolbar.
-    assert window.menuBar().findChildren(QToolBar) == []
-    corner = window.menuBar().cornerWidget()
-    layout = corner.layout()
-    buttons = [layout.itemAt(i).widget() for i in range(layout.count())]
-    buttons = [b for b in buttons if isinstance(b, QToolButton)]  # left to right
-    assert [b.defaultAction() for b in buttons] == [
-        window.act_new,
+    # One seamless title bar: no menu bar, no toolbar.
+    assert window.findChildren(QMenuBar) == [] and window.findChildren(QToolBar) == []
+    assert window.menuWidget() is window.title_bar
+    bar = window.title_bar
+    assert [b.defaultAction() for b in bar.command_buttons] == [
         window.act_open,
         window.act_save,
         window.act_save_as,
         window.act_import,
-        window.act_export,
         window.act_undo,
         window.act_redo,
-        window.act_help_panel,
-        window.act_settings,
     ]
+    icon_only = Qt.ToolButtonStyle.ToolButtonIconOnly
+    assert all(b.toolButtonStyle() == icon_only for b in bar.command_buttons)
+    assert not window.act_save.icon().isNull()
+    assert window.act_save.toolTip() == "Save (Ctrl+S)"
+    # Everything else lives in the main menu; shortcuts work without a menu bar.
+    menu = bar.menu_button.menu()
+    flat = menu.actions() + window.help_menu.actions()
+    commands = [
+        window.act_new, window.act_open, window.act_save, window.act_save_as,
+        window.act_save_portable, window.act_import, window.act_export, window.act_project,
+        window.act_settings, window.act_exit, window.act_guide, window.act_example,
+        window.act_about, window.act_logs, window.act_help_panel,
+    ]  # fmt: skip
+    for act in commands:
+        assert act in flat, act.text()
+        assert act in window.actions(), act.text()  # shortcut registered on the window
+    assert window.recent_menu.menuAction() in menu.actions()
 
 
 def test_trend_hover_values_show_below_variable_list(qtbot, window, example_copy):
@@ -314,13 +324,15 @@ def test_project_settings_change_display_timezone(qtbot, window):
     assert not dialog.apply_to(window.session.project)  # no change the second time
 
 
-def test_rail_shows_project_name_and_unsaved_state(qtbot, window, example_copy):
-    assert window.rail_project.text() == (window.session.project.name or "Untitled project")
+def test_title_shows_project_name_and_unsaved_state(qtbot, window, example_copy):
+    title = window.title_bar.title
+    assert (window.session.project.name or "Untitled project") in title.text()
     open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
     name = window.session.project.name
-    assert window.rail_project.text() == name
-    assert window.rail_project.toolTip().endswith("sample_project.imsproj")
+    assert name in title.text() and "unsaved" not in title.text()
+    assert "Inferential Model Studio" in title.text()
+    assert title.toolTip().endswith("sample_project.imsproj")
     window.session._set_dirty(True)
-    assert window.rail_project.text() == f"{name} (unsaved changes)"
+    assert f"{name} (unsaved changes)" in title.text()
     window.session._set_dirty(False)
     assert window.pages["import"].findChild(QLabel, "pageEyebrow").text() == "Stage 1 of 9"

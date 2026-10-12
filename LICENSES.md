@@ -49,6 +49,13 @@ license files.
 The Python runtime is distributed under the PSF License Agreement
 (https://docs.python.org/3/license.html).
 
+## Icons
+
+The interface icons in `assets/icons/fluent/` are from Microsoft's **Fluent UI System Icons**
+(https://github.com/microsoft/fluentui-system-icons), Copyright (c) 2020 Microsoft Corporation,
+MIT License. The license text ships next to the icons (`assets/icons/fluent/LICENSE`). The
+icons are recoloured at run time to match the theme; their shapes are unchanged.
+
 ## Development-only tools (not shipped)
 
 pytest (MIT), pytest-qt (MIT), ruff (MIT), PyInstaller (GPL-2.0 with a bootloader exception

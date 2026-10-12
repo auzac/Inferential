@@ -34,21 +34,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from inferential_studio.ui.theme import TOKENS
 from inferential_studio.ui.widgets.chart_menu import ChartViewBox, tidy_plot
+from inferential_studio.ui.widgets.plots import BLUE, SERIES, ValueAxis
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem, format_time
 
 # Okabe–Ito colour-blind-safe palette (black replaced by dark grey).
-PALETTE = ["#0072B2", "#E69F00", "#009E73", "#D55E00", "#CC79A7", "#56B4E9", "#F0E442", "#555555"]
+PALETTE = SERIES  # shared series colours (readable on both themes)
 AXIS_WIDTH = 72
 MAX_PLOTS = 12  # charts shown at once; more than this is slow to pan and hard to read
 BINS = 2048  # envelope bins per series: the resolution of the zoomed-out view
 RAW_SPAN_BINS = 8  # zoomed in closer than this many bins: draw the raw samples instead
 POINTS_MAX = 5000  # markers drawn for sparse point series (lab samples)
-HIGHLIGHT_COLOUR = (0, 114, 178)  # drag-to-zoom band, matching the cleaning page's range
+HIGHLIGHT_COLOUR = (47, 143, 216)  # drag-to-zoom band (BLUE), as the cleaning page's range
 MIN_DRAG_PX = 6  # shorter drags are treated as clicks, not zooms
-PIN_COLOUR = "#0072B2"  # vertical line marking the pinned point in time
+PIN_COLOUR = BLUE  # vertical line marking the pinned point in time
 HEADER_HEIGHT = 16  # px of the per-chart name header
-HEADER_TEXT = "#3b4754"
 
 
 @dataclass
@@ -159,7 +160,7 @@ class TrendView(QWidget):
 
         self.canvas = pg.GraphicsLayoutWidget()
         self.canvas.setProperty("chartName", "trends")
-        self.canvas.setBackground("w")
+        self.canvas.setBackground(TOKENS["chart_bg"])
         self.empty_label = QLabel("Select variables to plot.")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.limit_label = QLabel()
@@ -272,7 +273,9 @@ class TrendView(QWidget):
 
     def _make_plot(self, units_label: str) -> pg.PlotItem:
         axis = TzDateAxisItem(self._tz)
-        plot = pg.PlotItem(viewBox=_TrendViewBox(self), axisItems={"bottom": axis})
+        plot = pg.PlotItem(
+            viewBox=_TrendViewBox(self), axisItems={"bottom": axis, "left": ValueAxis("left")}
+        )
         tidy_plot(plot)  # no PyQtGraph menu or "A" button (Fit all is the toolbar's)
         plot.showGrid(x=True, y=True, alpha=0.15)
         plot.getAxis("left").setWidth(AXIS_WIDTH)
@@ -468,6 +471,12 @@ class TrendView(QWidget):
                 items[name] = (lo, hi, signature)
         self._set_header(plot, group)
 
+    def apply_theme(self) -> None:
+        """After a theme switch: chart background and the per-chart name headers."""
+        self.canvas.setBackground(TOKENS["chart_bg"])
+        for plot, group in zip(self.plots, self._plot_series, strict=True):
+            self._set_header(plot, group)
+
     def _set_header(self, plot: pg.PlotItem, group: list[TrendSeries]) -> None:
         """One-line chart header: a colour key and the name of each series, left-aligned."""
         parts = []
@@ -477,7 +486,7 @@ class TrendView(QWidget):
                 f"<span style='color:{self._colour_for(s.name)}'>{mark}</span>&nbsp;{escape(s.name)}"
             )
         plot.setTitle(
-            "&nbsp;&nbsp;&nbsp;".join(parts), size="8pt", color=HEADER_TEXT, justify="left"
+            "&nbsp;&nbsp;&nbsp;".join(parts), size="8pt", color=TOKENS["text"], justify="left"
         )
         plot.titleLabel.setMaximumHeight(HEADER_HEIGHT)
         plot.layout.setRowFixedHeight(0, HEADER_HEIGHT)

@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 SETTINGS_FILE = "settings.json"
 MAX_RECENT = 10
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+THEME_SETTINGS = ("auto", "light", "dark")
 
 
 @dataclass
@@ -33,6 +34,8 @@ class AppSettings:
     author_name: str = ""  # recorded on exclusions and model cards
     window_geometry: str = ""  # Qt saveGeometry() as base64; empty = size to the screen
     help_panel: bool | None = None  # None = automatic (shown on wide screens only)
+    theme: str = "auto"  # "light", "dark" or "auto" (follow the operating system)
+    system_title_bar: bool = False  # True: the system's window frame instead of our own
 
     def add_recent(self, path: str | os.PathLike[str]) -> None:
         text = str(Path(path))
@@ -56,6 +59,8 @@ class AppSettings:
             author_name=self.author_name if isinstance(self.author_name, str) else "",
             window_geometry=self.window_geometry if isinstance(self.window_geometry, str) else "",
             help_panel=self.help_panel if isinstance(self.help_panel, bool) else None,
+            theme=self.theme if self.theme in THEME_SETTINGS else default.theme,
+            system_title_bar=self.system_title_bar is True,
         )
 
 
