@@ -9,6 +9,6 @@ Package layout:
     ui              PySide6 widgets. Calls into ``core``; never implements algorithms.
 """
 
-__version__ = "0.5.4"
+__version__ = "0.5.5"
 APP_NAME = "Inferential Model Studio"
 APP_ID = "InferentialModelStudio"  # filesystem-safe identifier for config/log directories

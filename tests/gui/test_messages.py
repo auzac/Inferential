@@ -50,6 +50,25 @@ def test_panel_is_fixed_and_filters_by_stage(qtbot):
     assert panel.badges[Level.WARNING].text() == "1 warning"
 
 
+def test_theme_switch_keeps_selection_and_scroll(qtbot):
+    center = MessageCenter()
+    panel = MessagePanel(center)
+    qtbot.addWidget(panel)
+    panel.show()
+    for i in range(15):
+        center.info(f"message number {i}", "cleaning")
+    qtbot.waitUntil(lambda: panel.list.topLevelItemCount() == 15, timeout=2000)
+    bar = panel.list.verticalScrollBar()
+    qtbot.waitUntil(lambda: bar.maximum() > 0, timeout=2000)
+    bar.setValue(bar.maximum())
+    panel.list.setCurrentItem(panel.list.topLevelItem(12))
+    expected = panel.list.currentItem().text(3)  # newest first: index 12 ≠ "message number 12"
+    panel.apply_theme()  # a theme switch rebuilds the list: keep where the user was
+    current = panel.list.currentItem()
+    assert current is not None and current.text(3) == expected
+    assert bar.value() == bar.maximum()
+
+
 def test_errors_go_to_the_panel_not_a_dialog(qtbot):
     w = MainWindow(AppSettings())
     qtbot.addWidget(w)

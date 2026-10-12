@@ -26,6 +26,7 @@ from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.plots import (
+    GREY,
     SPLIT_COLOURS,
     SPLIT_NAMES,
     legend,
@@ -256,7 +257,7 @@ class ValidationPage(StagePage):
         lo = float(np.nanmin(pred[["actual", "predicted"]].to_numpy()))
         hi = float(np.nanmax(pred[["actual", "predicted"]].to_numpy()))
         self.avp.plot(
-            [lo, hi], [lo, hi], pen=pg.mkPen("#555555", style=Qt.PenStyle.DashLine), name="identity"
+            [lo, hi], [lo, hi], pen=pg.mkPen(GREY, style=Qt.PenStyle.DashLine), name="identity"
         )
         self.avp.setLabel("bottom", "Actual (lab)")
         self.avp.setLabel("left", "Predicted")
@@ -264,7 +265,7 @@ class ValidationPage(StagePage):
     def _trend(self, pred: pd.DataFrame) -> None:
         x = to_epoch_seconds(pd.DatetimeIndex(pred["sample_time"]))
         order = np.argsort(x)
-        self.trend.plot(x[order], pred["predicted"].to_numpy()[order], pen=pg.mkPen("#555555", width=1),
+        self.trend.plot(x[order], pred["predicted"].to_numpy()[order], pen=pg.mkPen(GREY, width=1),
                         name="Predicted")  # fmt: skip
         for split, sub in self._by_split(pred):
             sx = to_epoch_seconds(pd.DatetimeIndex(sub["sample_time"]))
@@ -288,7 +289,7 @@ class ValidationPage(StagePage):
             self.res_acf.addItem(pg.BarGraphItem(x=lags + offset, height=acf, width=0.24,
                                                  brush=SPLIT_COLOURS[split], name=SPLIT_NAMES[split]))  # fmt: skip
         for p in (self.res_time, self.res_pred):
-            p.addItem(pg.InfiniteLine(0, angle=0, pen=pg.mkPen("#555555")))
+            p.addItem(pg.InfiniteLine(0, angle=0, pen=pg.mkPen(GREY)))
         self.res_pred.setLabel("bottom", "Predicted")
         self.res_hist.setLabel("bottom", "Residual (actual − predicted)")
         self.res_acf.setLabel("bottom", "Lag (lab samples)")
@@ -310,7 +311,7 @@ class ValidationPage(StagePage):
         pred["x"] = run.feature_values[name].to_numpy()[pred["row"].to_numpy()]
         for split, sub in self._by_split(pred):
             scatter(self.res_x, sub["x"], sub["residual"], SPLIT_COLOURS[split], size=5)
-        self.res_x.addItem(pg.InfiniteLine(0, angle=0, pen=pg.mkPen("#555555")))
+        self.res_x.addItem(pg.InfiniteLine(0, angle=0, pen=pg.mkPen(GREY)))
         units = next((v.units for v in self._session.project.variables if v.name == name), None)
         self.res_x.setLabel("bottom", f"{name} (aligned feature)", units=units)
         self.res_x.setLabel("left", "Residual")

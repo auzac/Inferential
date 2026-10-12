@@ -31,11 +31,14 @@ from inferential_studio.ui.messages import APP, Level, Message, MessageCenter
 from inferential_studio.ui.stages import STAGES
 from inferential_studio.ui.theme import TOKENS
 
-LEVEL_COLOURS = {
-    Level.INFO: TOKENS["info"],
-    Level.WARNING: TOKENS["warning"],
-    Level.ERROR: TOKENS["error"],
-}
+LEVEL_TOKENS = {Level.INFO: "info", Level.WARNING: "warning", Level.ERROR: "error"}
+
+
+def level_colour(level: Level) -> str:
+    """The current theme's colour for a message level."""
+    return TOKENS[LEVEL_TOKENS[level]]
+
+
 LEVEL_NAMES = {Level.INFO: "Info", Level.WARNING: "Warning", Level.ERROR: "Error"}
 STAGE_TITLES = {s.key: f"{s.number}. {s.title}" for s in STAGES} | {APP: "Application"}
 ROWS_VISIBLE = 4
@@ -57,7 +60,7 @@ def level_icon(level: Level, size: int = 14) -> QIcon:
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QBrush(QColor(LEVEL_COLOURS[level])))
+    p.setBrush(QBrush(QColor(level_colour(level))))
     s = float(size)
     if level is Level.ERROR:  # octagon-like square
         p.drawRoundedRect(1, 1, s - 2, s - 2, 2, 2)
@@ -69,7 +72,7 @@ def level_icon(level: Level, size: int = 14) -> QIcon:
         p.drawPath(path)
     else:  # circle
         p.drawEllipse(QPointF(s / 2, s / 2), s / 2 - 1.5, s / 2 - 1.5)
-    p.setPen(QColor("white"))
+    p.setPen(QColor(TOKENS["on_accent"]))  # readable on both themes
     font = p.font()
     font.setBold(True)
     font.setPixelSize(int(s * 0.7))
@@ -94,7 +97,7 @@ def ok_icon(size: int = 14) -> QIcon:
     p.setBrush(QBrush(QColor(TOKENS["success"])))
     s = float(size)
     p.drawEllipse(QPointF(s / 2, s / 2), s / 2 - 1.5, s / 2 - 1.5)
-    pen = QPen(QColor("white"))
+    pen = QPen(QColor(TOKENS["on_accent"]))
     pen.setWidthF(max(1.5, s / 9))
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     p.setPen(pen)
@@ -196,6 +199,16 @@ class MessagePanel(QFrame):
         return self._center.conditions(source) + events
 
     @Slot()
+    def apply_theme(self) -> None:
+        """Recolour the level icons; rebuild, keeping the selection and scroll position."""
+        selected = self.list.indexOfTopLevelItem(self.list.currentItem())
+        scroll = self.list.verticalScrollBar().value()
+        self._icons = {lvl: level_icon(lvl) for lvl in Level}
+        self.refresh()
+        if 0 <= selected < self.list.topLevelItemCount():
+            self.list.setCurrentItem(self.list.topLevelItem(selected))
+        self.list.verticalScrollBar().setValue(scroll)
+
     def refresh(self) -> None:
         self.list.clear()
         for m in self.visible_messages():
@@ -203,7 +216,7 @@ class MessagePanel(QFrame):
             item = QTreeWidgetItem(["  " + LEVEL_NAMES[m.level], when, STAGE_TITLES.get(m.source, m.source),
                                     m.text.replace("\n", " ")])  # fmt: skip
             item.setIcon(0, self._icons[m.level])
-            item.setForeground(0, QBrush(QColor(LEVEL_COLOURS[m.level])))
+            item.setForeground(0, QBrush(QColor(level_colour(m.level))))
             tip = m.text + (f"\n\n{m.details}" if m.details else "")
             for c in range(4):
                 item.setToolTip(c, tip)

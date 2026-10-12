@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
+from inferential_studio.ui.theme import TOKENS
 from inferential_studio.ui.widgets.chart_menu import add_plot
 
 DIVERGING = pg.ColorMap(
@@ -38,7 +39,7 @@ class CorrelationHeatmap(QWidget):
         self._absolute = False
 
         self.canvas = pg.GraphicsLayoutWidget()
-        self.canvas.setBackground("w")
+        self.canvas.setBackground(TOKENS["chart_bg"])
         self.canvas.setProperty("chartName", "correlation")
         self.plot = add_plot(self.canvas)
         self.plot.setAspectLocked(True)
@@ -53,7 +54,7 @@ class CorrelationHeatmap(QWidget):
         self._texts: list[pg.TextItem] = []
         self._cell_font = QFont()
         self._cell_font.setPointSize(7)
-        self._placeholder = pg.TextItem("", color="#596675", anchor=(0.5, 0.5))
+        self._placeholder = pg.TextItem("", color=TOKENS["text_muted"], anchor=(0.5, 0.5))
         self._placeholder.setPos(0.5, 0.5)
         self._placeholder.setVisible(False)
         self.plot.addItem(self._placeholder)
@@ -66,6 +67,9 @@ class CorrelationHeatmap(QWidget):
         self._proxy = pg.SignalProxy(
             self.canvas.scene().sigMouseMoved, rateLimit=30, slot=self._on_hover
         )
+
+    def apply_theme(self) -> None:
+        self._placeholder.setColor(TOKENS["text_muted"])
 
     def set_placeholder(self, text: str) -> None:
         """Show a message instead of a matrix (e.g. fewer than two variables chosen)."""

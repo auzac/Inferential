@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import QRectF, Qt, QTimer, Slot
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -36,16 +37,24 @@ from inferential_studio.ui.messages import Level
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
+from inferential_studio.ui.theme import TOKENS
 from inferential_studio.ui.widgets.chart_menu import add_plot
 from inferential_studio.ui.widgets.cursor_readout import CursorReadout
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.flow_layout import flow_row
 from inferential_studio.ui.widgets.heatmap import CorrelationHeatmap
-from inferential_studio.ui.widgets.plots import clear_placeholder, plot_widget, show_placeholder
+from inferential_studio.ui.widgets.plots import (
+    BLUE,
+    clear_placeholder,
+    plot_widget,
+    show_placeholder,
+)
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem, to_epoch_seconds
-from inferential_studio.ui.widgets.trend_view import PALETTE, TrendSeries, TrendView
+from inferential_studio.ui.widgets.trend_view import TrendSeries, TrendView
 
-COVERAGE_FULL = (63, 143, 107)  # muted green for 100 % valid (white = none)
+SCATTER_RGB = (47, 143, 216)  # BLUE as RGB, for translucent points and bars
+COVERAGE_FULL = (63, 143, 107)  # muted green for 100 % valid (chart background = none)
+NO_ROWS = (140, 140, 140)  # bins without any timestamp
 SCATTER_DISPLAY_MAX = 20_000  # points drawn in scatter plots; statistics always use all data
 MATRIX_MAX = 6
 DEFAULT_SELECTED = 4
@@ -205,7 +214,7 @@ class EdaPage(StagePage):
         self.tabs.addTab(self._corr_tab, "Correlation")
 
         self.matrix = pg.GraphicsLayoutWidget()
-        self.matrix.setBackground("w")
+        self.matrix.setBackground(TOKENS["chart_bg"])
         self.matrix.setProperty("chartName", "scatter_matrix")
         self.matrix_note = QLabel()
         self._matrix_tab = QWidget()
@@ -226,13 +235,13 @@ class EdaPage(StagePage):
         self.tabs.addTab(self._hist_tab, "Distribution")
 
         self.coverage_canvas = pg.GraphicsLayoutWidget()
-        self.coverage_canvas.setBackground("w")
+        self.coverage_canvas.setBackground(TOKENS["chart_bg"])
         self.coverage_canvas.setProperty("chartName", "coverage")
         self._cov_tab = QWidget()
         cvl = QVBoxLayout(self._cov_tab)
         cvl.addWidget(self.coverage_canvas, 1)
         cov_note = QLabel(
-            "Top: share of rows with a valid value per variable and time bin (green = complete, white = "
+            "Top: share of rows with a valid value per variable and time bin (green = complete, blank = "
             "none, grey = no rows). Bottom: rows (timestamps) per bin."
         )
         cov_note.setWordWrap(True)
@@ -273,6 +282,11 @@ class EdaPage(StagePage):
         self._on_data_changed()
 
     # ------------------------------------------------------------------ data
+
+    def apply_theme(self) -> None:
+        """After a theme switch: the coverage image blends into the new chart background."""
+        if self._result is not None:
+            self._update_coverage()
 
     @Slot()
     def _on_project_changed(self) -> None:
@@ -507,7 +521,7 @@ class EdaPage(StagePage):
         sub = pair.iloc[idx]
         self.pair_plot.plot(
             sub[col_var].to_numpy(), sub[row_var].to_numpy(), pen=None, symbol="o", symbolSize=3,
-            symbolBrush=pg.mkBrush(0, 114, 178, 90), symbolPen=None,
+            symbolBrush=pg.mkBrush(*SCATTER_RGB, 90), symbolPen=None,
         )  # fmt: skip
         self.pair_plot.setLabel("bottom", col_var, units=self._units.get(col_var))
         self.pair_plot.setLabel("left", row_var, units=self._units.get(row_var))
@@ -546,13 +560,13 @@ class EdaPage(StagePage):
                             counts,
                             stepMode="center",
                             fillLevel=0,
-                            brush=(0, 114, 178, 120),
+                            brush=(*SCATTER_RGB, 120),
                             pen=None,
                         )
                 else:
                     xy = sub[[xname, yname]].dropna()
                     p.plot(xy[xname].to_numpy(), xy[yname].to_numpy(), pen=None, symbol="o", symbolSize=2,
-                           symbolBrush=pg.mkBrush(0, 114, 178, 80), symbolPen=None)  # fmt: skip
+                           symbolBrush=pg.mkBrush(*SCATTER_RGB, 80), symbolPen=None)  # fmt: skip
         extra = (
             " (first 6 checked variables)" if len(self.selected_variables()) > MATRIX_MAX else ""
         )
@@ -576,8 +590,8 @@ class EdaPage(StagePage):
                 counts,
                 stepMode="center",
                 fillLevel=0,
-                brush=(0, 114, 178, 140),
-                pen=pg.mkPen("#0072B2"),
+                brush=(*SCATTER_RGB, 140),
+                pen=pg.mkPen(BLUE),
             )
         self.hist_plot.setLabel("bottom", name, units=self._units.get(name))
         self.hist_plot.setLabel("left", "Count")
@@ -591,9 +605,11 @@ class EdaPage(StagePage):
         n_vars, n_bins = frac.shape
         rgb = np.empty((n_vars, n_bins, 3), dtype=np.uint8)
         f = np.nan_to_num(frac, nan=0.0)
-        for channel, full in enumerate(COVERAGE_FULL):  # white (no data) → green (complete)
-            rgb[..., channel] = (255 - f * (255 - full)).astype(np.uint8)
-        rgb[np.isnan(frac)] = (200, 200, 200)
+        empty = QColor(TOKENS["chart_bg"]).getRgb()[:3]
+        for channel, full in enumerate(COVERAGE_FULL):  # background (no data) → green (complete)
+            lo = empty[channel]
+            rgb[..., channel] = np.clip(lo + f * (full - lo), 0, 255).astype(np.uint8)
+        rgb[np.isnan(frac)] = NO_ROWS
         x0 = to_epoch_seconds(pd.DatetimeIndex([cov.bin_starts[0]]))[0]
         width = cov.bin_width.total_seconds() * n_bins
         tz = self._session.project.display_timezone
@@ -613,7 +629,7 @@ class EdaPage(StagePage):
         for plot in (top, bottom):
             plot.getAxis("left").setWidth(axis_width)
         centres = x0 + (np.arange(n_bins) + 0.5) * cov.bin_width.total_seconds()
-        bottom.plot(centres, cov.rows, pen=pg.mkPen(PALETTE[0], width=1.5), stepMode=None)
+        bottom.plot(centres, cov.rows, pen=pg.mkPen(BLUE, width=1.5), stepMode=None)
         bottom.setLabel("left", "Rows / bin")
         bottom.setYRange(0, max(float(cov.rows.max()), 1.0) * 1.1, padding=0)
         bottom.setXLink(top)

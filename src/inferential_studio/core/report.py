@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from inferential_studio.core import colours
 from inferential_studio.core.artifacts import ModelArtifact
 from inferential_studio.core.models import METRIC_COLUMNS, METRIC_LABELS
 from inferential_studio.core.schemas import Project
@@ -21,7 +22,7 @@ from inferential_studio.core.splits import TEST, TRAIN, VALIDATION
 from inferential_studio.core.svg import Series, bar_chart, xy_chart
 
 SPLIT_NAMES = {TRAIN: "Training", VALIDATION: "Validation", TEST: "Final test"}
-SPLIT_COLOURS = {TRAIN: "#0072B2", VALIDATION: "#E69F00", TEST: "#D55E00"}
+SPLIT_COLOURS = {TRAIN: colours.TRAIN, VALIDATION: colours.VALIDATION, TEST: colours.TEST}
 
 CSS = """
 body { font-family: "Segoe UI", Arial, sans-serif; color: #222; margin: 28px auto; max-width: 980px;

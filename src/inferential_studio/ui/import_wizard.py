@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QGuiApplication
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -636,7 +636,7 @@ class ColumnsPage(QWizardPage):
             pct = QTableWidgetItem(f"{share:.0%}")
             pct.setFlags(Qt.ItemFlag.ItemIsEnabled)
             if share < 0.5:
-                pct.setForeground(Qt.GlobalColor.darkRed)
+                pct.setForeground(QColor(TOKENS["error"]))
             self.table.setItem(row, 5, pct)
         self.table.blockSignals(False)
         self.completeChanged.emit()

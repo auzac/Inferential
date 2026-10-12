@@ -62,13 +62,14 @@ from inferential_studio.ui.widgets.cursor_readout import CursorReadout
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.flow_layout import flow_row
 from inferential_studio.ui.widgets.overlays import IntervalShade, mask_spans
+from inferential_studio.ui.widgets.plots import ORANGE, VERMILION
 from inferential_studio.ui.widgets.time_axis import to_epoch_seconds
 from inferential_studio.ui.widgets.trend_view import TrendSeries, TrendView
 from inferential_studio.ui.widgets.variable_list import VariableList
 
 REGIME_COLOUR = "#7a7a7a"
-VARIABLE_COLOUR = "#E69F00"
-PENDING_COLOUR = "#D55E00"
+VARIABLE_COLOUR = ORANGE
+PENDING_COLOUR = VERMILION
 MARKER_LIMIT = 5000
 STATUS_LABELS = {
     EventStatus.PENDING: "Pending review",
@@ -591,7 +592,7 @@ class CleaningPage(StagePage):
         self._regions = []
         for plot in self.trends.plots:
             region = pg.LinearRegionItem(
-                values=self._selection, brush=pg.mkBrush(0, 114, 178, 40), movable=True
+                values=self._selection, brush=pg.mkBrush(47, 143, 216, 40), movable=True
             )
             region.setZValue(10)
             region.sigRegionChanged.connect(self._region_moved)
@@ -749,6 +750,21 @@ class CleaningPage(StagePage):
             for c, cell in enumerate(cells):
                 t.setItem(r, c, cell)
         t.blockSignals(False)
+
+    def apply_theme(self) -> None:
+        """Re-apply the error colour cached in the rules table cells (see ui/theme.py)."""
+        state = self._session.cleaning
+        errors = state.rule_errors if state else {}
+        last = self.rules_table.columnCount() - 1
+        for r in range(self.rules_table.rowCount()):
+            key = self.rules_table.item(r, 0)
+            cell = self.rules_table.item(r, last)
+            if (
+                key is not None
+                and cell is not None
+                and key.data(Qt.ItemDataRole.UserRole) in errors
+            ):
+                cell.setForeground(theme_colour("error"))
 
     def _rule_toggled(self, item: QTableWidgetItem) -> None:
         if item.column() != 0:

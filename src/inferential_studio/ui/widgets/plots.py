@@ -1,4 +1,8 @@
-"""Small plotting helpers shared by the modelling pages (PyQtGraph, white background)."""
+"""Chart helpers shared by the pages (PyQtGraph): themed charts, empty states, series key.
+
+Data colours are mid-tones that read on both the light and the dark chart background, so a
+theme switch only recolours the chart chrome (background, axes, header), never the data.
+"""
 
 from __future__ import annotations
 
@@ -10,23 +14,57 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextOption
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
+from inferential_studio.core import colours
 from inferential_studio.core.splits import PURGED, TEST, TRAIN, VALIDATION
+from inferential_studio.ui.theme import TOKENS
 from inferential_studio.ui.widgets.chart_menu import ChartViewBox, tidy_plot
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem
 
+# Colour-blind-safe series colours (Okabe–Ito hues, lightness adjusted so every colour keeps
+# contrast on both the light and the dark chart background). The split colours are shared
+# with the exported model-card SVGs (core/colours.py).
+BLUE = colours.TRAIN
+ORANGE = colours.VALIDATION
+GREEN = "#14A37F"
+VERMILION = colours.TEST
+PINK = "#C978A9"
+SKY = "#5BB7E8"
+OLIVE = "#C9B23A"
+GREY = "#8C8C8C"  # reference lines, lab values shown for comparison
+SERIES = [BLUE, ORANGE, GREEN, VERMILION, PINK, SKY, OLIVE, GREY]
+FAINT = "#8C8C8C"  # de-emphasised points (e.g. "not eligible"): scatter() paints it at 40%
+
 SPLIT_COLOURS = {
-    TRAIN: "#0072B2",
-    VALIDATION: "#E69F00",
-    TEST: "#D55E00",
-    PURGED: "#999999",
-    "not eligible": "#CCCCCC",
+    TRAIN: BLUE,
+    VALIDATION: ORANGE,
+    TEST: VERMILION,
+    PURGED: "#9A9A9A",
+    "not eligible": FAINT,
 }
 SPLIT_NAMES = {TRAIN: "Training", VALIDATION: "Validation", TEST: "Final test"}
 AXIS_WIDTH = 72
-TEXT_MUTED = "#596675"  # theme text_muted (kept literal: widgets do not import the theme)
-KEY_TEXT = "#3b4754"  # chart header text
-POSITIVE = "#0072B2"
-NEGATIVE = "#D55E00"
+POSITIVE = BLUE
+NEGATIVE = VERMILION
+
+
+class ValueAxis(pg.AxisItem):
+    """Value axis whose tick labels never overlap.
+
+    PyQtGraph always labels every major tick, so on short charts (stacked trends) labels can
+    be drawn on top of each other. Ticks and grid lines are unchanged; a label that would
+    overlap one already placed is skipped (major-level labels are placed first, so they win).
+    """
+
+    def generateDrawSpecs(self, p):  # noqa: ANN001, ANN201, N802 - PyQtGraph override
+        specs = super().generateDrawSpecs(p)
+        if not specs:
+            return specs
+        axis_spec, tick_specs, text_specs = specs
+        kept: list = []
+        for spec in text_specs:
+            if not any(spec[0].intersects(other[0]) for other in kept):
+                kept.append(spec)
+        return axis_spec, tick_specs, kept
 
 
 EMPTY_TEXT = "No data to show yet."
@@ -58,7 +96,7 @@ class ChartPlotItem(pg.PlotItem):
         self._grid: tuple = (None, None, None)
         self._mouse = (True, True)
         self._axes_shown: dict[str, bool] = {}
-        self._message = pg.TextItem(empty_text, color=TEXT_MUTED, anchor=(0.5, 0.5))
+        self._message = pg.TextItem(empty_text, color=TOKENS["text_muted"], anchor=(0.5, 0.5))
         self._message.setPos(0.5, 0.5)
         option = QTextOption(Qt.AlignmentFlag.AlignHCenter)
         option.setWrapMode(QTextOption.WrapMode.WordWrap)
@@ -80,6 +118,11 @@ class ChartPlotItem(pg.PlotItem):
     @property
     def empty_text(self) -> str:
         return self._message.toPlainText()
+
+    def apply_theme(self) -> None:
+        """After a theme switch: message and header colours (data colours stay)."""
+        self._message.setColor(TOKENS["text_muted"])
+        self._render_header()
 
     def set_empty_text(self, text: str) -> None:
         self._message.setText(text)
@@ -170,7 +213,7 @@ class ChartPlotItem(pg.PlotItem):
             for _id, mark, colour, name in key
         ]
         super().setTitle(
-            "&nbsp;&nbsp;&nbsp;&nbsp;".join(parts), color=KEY_TEXT, size="8pt", justify="left"
+            "&nbsp;&nbsp;&nbsp;&nbsp;".join(parts), color=TOKENS["text"], size="8pt", justify="left"
         )
 
     def _set_empty(self, empty: bool) -> None:
@@ -199,7 +242,7 @@ class ChartPlotItem(pg.PlotItem):
 
 
 def _colour_name(spec: object) -> str:
-    return pg.mkColor(spec).name() if spec is not None else KEY_TEXT
+    return pg.mkColor(spec).name() if spec is not None else TOKENS["text"]
 
 
 def _key_entry(item: object) -> tuple[str, str, str] | None:
@@ -244,13 +287,16 @@ def plot_widget(
     name: str | None = None,
     empty_text: str = EMPTY_TEXT,
 ) -> pg.PlotWidget:
-    """White plot with a grid, the standard right-click menu and an automatic empty state.
+    """Themed plot with a grid, the standard right-click menu and an automatic empty state.
 
     ``time_axis`` = display timezone for a date axis at the bottom; ``name`` = file-name stem
     offered by *Save image…* (defaults to the title); ``empty_text`` = message while empty.
     """
-    axis = {"bottom": TzDateAxisItem(time_axis)} if time_axis else None
-    w = pg.PlotWidget(background="w", plotItem=ChartPlotItem(axisItems=axis, empty_text=empty_text))
+    axes: dict[str, pg.AxisItem] = {"left": ValueAxis("left")}
+    if time_axis:
+        axes["bottom"] = TzDateAxisItem(time_axis)
+    plot_item = ChartPlotItem(axisItems=axes, empty_text=empty_text)
+    w = pg.PlotWidget(background=TOKENS["chart_bg"], plotItem=plot_item)
     if name:
         w.setProperty("chartName", name)
     w.showGrid(x=True, y=True, alpha=0.15)
@@ -288,7 +334,7 @@ def legend(plot: pg.PlotWidget, corner: str = "top-left") -> None:  # noqa: ARG0
 def scatter(plot: pg.PlotItem | pg.PlotWidget, x, y, colour: str, name: str | None = None,  # noqa: ANN001
             size: int = 6, symbol: str = "o") -> pg.PlotDataItem:  # fmt: skip
     c = pg.mkColor(colour)
-    c.setAlpha(190)
+    c.setAlpha(102 if colour == FAINT else 190)
     return plot.plot(
         np.asarray(x, dtype=float), np.asarray(y, dtype=float), pen=None, symbol=symbol,
         symbolSize=size, symbolBrush=pg.mkBrush(c), symbolPen=None, name=name,
@@ -319,9 +365,9 @@ def bar_chart(
         plot.getAxis("left").setTicks(None)
     plot.addItem(item)
     if horizontal:
-        plot.addItem(pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("#666666")))
+        plot.addItem(pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen(GREY)))
     else:
-        plot.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen("#666666")))
+        plot.addItem(pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen(GREY)))
     plot.autoRange()
 
 

@@ -1,11 +1,29 @@
 # User guide
 
-This guide covers **v0.5.4**: all nine stages, from data import to the model card. The **Help
-panel** on the right gives a short guide to the stage on screen; **F1** opens this guide inside
-the application (offline). The panel starts open on wide screens and closed on laptops; show or
-hide it with **Help panel** on the menu bar (Shift+F1). The window remembers its size, position
-and your Help panel choice between sessions. The name of the open project is shown under the
-application name on the left; "(unsaved changes)" appears there until you save.
+This guide covers **v0.5.5**: all nine stages, from data import to the model card. **F1** opens
+this guide inside the application (offline).
+
+**The window.** The title bar holds the menu and the commands:
+
+- **≡ Menu** (Alt+F) — every command: new, open, open recent, save, save as, save portable
+  copy, import, export, undo, redo, project settings, settings, help and exit.
+- **Icon buttons** for the frequent commands — open, save, save as, import, undo and redo. Hover
+  for the name and shortcut; undo/redo name the step they will undo or redo.
+- **The project name** in the centre; "(unsaved changes)" appears after it until you save.
+- **Help panel** (Shift+F1) — a short guide to the stage on screen, on the right. It starts open
+  on wide screens and closed on laptops.
+- **Light/dark switch** — Windows dark mode colours or a warm light theme. *Settings* also
+  offers *Follow Windows*, which changes with the Windows setting.
+- Minimise, maximise and close. Drag the title bar to move the window (including Windows snap)
+  and double-click it to maximise.
+
+**Stages.** The rail on the left lists the nine stages in workflow order, one icon each (hover for
+the name). The button at its top slides the stage names out over the page; choosing a stage, Esc
+or a click anywhere else closes it again. The page underneath never moves or resizes.
+
+The window remembers its size, position and your Help panel choice between sessions. If the
+custom title bar does not suit a screen reader or a window-management tool, *Settings → Use the
+system title bar* brings back the standard Windows frame (after a restart).
 
 **Messages.** Every status line, warning and error appears in the fixed **Messages** panel at
 the bottom of the window — never inside the page, so charts and tables stay where they are.
@@ -17,7 +35,7 @@ removes the history.
 
 ## 1. Start with the example
 
-1. **Help → Generate Example Dataset…** (also on the Data Import page of an empty project) and
+1. **≡ → Help → Generate example dataset…** (also on the Data Import page of an empty project) and
    choose a folder. The app writes an artificial distillation dataset (`tower_process.csv`,
    `lab_results.xlsx`), its ground truth and `sample_project.imsproj`, then offers to open the
    project.
@@ -28,9 +46,9 @@ Opening a project reads its data files in the background; the status bar shows p
 
 ## 2. Import your own data
 
-**File → Import Data…** (Ctrl+I) or the **Import data…** button on the Data Import page start a
-five-step wizard. One file can hold process tags, lab/analyzer results, or both — the wizard
-works out the source type from what you choose:
+**≡ → Import data…** (Ctrl+I, or the import icon in the title bar) or the **Import data…** button
+on the Data Import page start a five-step wizard. One file can hold process tags, lab/analyzer
+results, or both — the wizard works out the source type from what you choose:
 
 1. **File** — drag a file onto the window or browse. CSV, TSV, TXT and Excel `.xlsx` are
    supported. The file is never modified.
@@ -108,7 +126,7 @@ causation — clean the data first before choosing predictors.
 ## 5. Clean the data (Cleaning & Exclusions)
 
 Nothing you do here deletes data: exclusions are stored as definitions and can be switched
-off, edited or undone (**Edit → Undo**, Ctrl+Z).
+off, edited or undone (**Undo** in the title bar, Ctrl+Z).
 
 - **View**: *Raw* (original values), *Flagged* (original values; grey bands = excluded for all
   variables, orange = excluded for that variable only, red dots = flagged and awaiting your

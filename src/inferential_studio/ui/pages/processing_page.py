@@ -60,7 +60,16 @@ from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.theme import mark_primary, theme_colour
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.flow_layout import flow_row
-from inferential_studio.ui.widgets.plots import legend, note_label, plot_widget, scatter
+from inferential_studio.ui.widgets.plots import (
+    BLUE,
+    FAINT,
+    GREY,
+    VERMILION,
+    legend,
+    note_label,
+    plot_widget,
+    scatter,
+)
 from inferential_studio.ui.widgets.time_axis import format_time, to_epoch_seconds
 
 NO_PREDICTOR_TEXT = "Choose a target and predictors on Variable Selection to preview them."
@@ -107,7 +116,7 @@ COVERAGE_HEADERS = {
     "causal": "Causal",
 }
 RAW_COLOUR = "#9a9a9a"
-PROCESSED_COLOUR = "#0072B2"
+PROCESSED_COLOUR = BLUE
 WINDOW_COLOUR = (230, 159, 0, 60)
 
 
@@ -429,6 +438,13 @@ class ProcessingPage(StagePage):
                 text = f"{int((fm.status[name].to_numpy()[usable] == OK).sum()):,}"
             self.table.setItem(r, len(COLUMNS) - 1, _item(text))
 
+    def apply_theme(self) -> None:
+        """Re-apply the error colour cached in the table cells (see ui/theme.py)."""
+        for r, spec in enumerate(self.specs()[: self.table.rowCount()]):
+            item = self.table.item(r, 11)
+            if item is not None and not spec.is_causal:
+                item.setForeground(theme_colour("error"))
+
     @Slot()
     def _selection_changed(self) -> None:
         self._load_form()
@@ -582,9 +598,7 @@ class ProcessingPage(StagePage):
         if ok.any():
             scatter(self.y_plot, tx[ok], y[ok], PROCESSED_COLOUR, size=5)
         if (~ok).any():
-            scatter(
-                self.y_plot, tx[~ok], np.nan_to_num(y[~ok], nan=np.nanmean(y)), "#BBBBBB", size=5
-            )
+            scatter(self.y_plot, tx[~ok], np.nan_to_num(y[~ok], nan=np.nanmean(y)), FAINT, size=5)
         self.y_plot.setLabel("left", "Y (lab)")
         k = self._sample
         start, end = spec.window_offsets_s
@@ -595,10 +609,10 @@ class ProcessingPage(StagePage):
         self.x_plot.addItem(region, ignoreBounds=True)
         for p in (self.x_plot, self.y_plot):
             p.addItem(
-                pg.InfiniteLine(t, angle=90, pen=pg.mkPen("#D55E00", width=1.5)), ignoreBounds=True
+                pg.InfiniteLine(t, angle=90, pen=pg.mkPen(VERMILION, width=1.5)), ignoreBounds=True
             )
         scatter(
-            self.y_plot, [t], [y[k] if np.isfinite(y[k]) else np.nanmean(y)], "#D55E00", size=11
+            self.y_plot, [t], [y[k] if np.isfinite(y[k]) else np.nanmean(y)], VERMILION, size=11
         )
         value, status = np.nan, ""
         if name in fm.X.columns:
@@ -608,7 +622,7 @@ class ProcessingPage(StagePage):
             gap = fm.gap_s[name].iat[k]
             if np.isfinite(value):
                 self.x_plot.plot(
-                    [t + start, t + end], [value, value], pen=pg.mkPen("#D55E00", width=3)
+                    [t + start, t + end], [value, value], pen=pg.mkPen(VERMILION, width=3)
                 )
         tz = self._session.project.display_timezone
         lines = [
@@ -700,7 +714,7 @@ class ProcessingPage(StagePage):
         spec = next((s for s in self.specs() if s.variable == scan.variable), None)
         if spec is not None:
             self.lag_plot.addItem(pg.InfiniteLine(spec.effective_delay_s / 60, angle=90,
-                                                  pen=pg.mkPen("#555555", style=Qt.PenStyle.DashLine)))  # fmt: skip
+                                                  pen=pg.mkPen(GREY, style=Qt.PenStyle.DashLine)))  # fmt: skip
         best = scan.best_delay_s
         cutoff = (
             f"training samples up to {format_time(to_epoch_seconds(pd.DatetimeIndex([scan.cutoff]))[0], self._session.project.display_timezone, with_seconds=False)}"
@@ -709,7 +723,7 @@ class ProcessingPage(StagePage):
         )
         if best is not None:
             i = int(np.flatnonzero(scan.delays_s == best)[0])
-            scatter(self.lag_plot, [best / 60], [scan.pearson[i]], "#D55E00", size=12)
+            scatter(self.lag_plot, [best / 60], [scan.pearson[i]], VERMILION, size=12)
             text = f"Largest |r| = {abs(scan.pearson[i]):.3f} at {best / 60:g} min ({cutoff}; n = {scan.n_pairs[i]})."
         else:
             text = f"Not enough samples to correlate ({cutoff})."

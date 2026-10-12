@@ -56,6 +56,7 @@ from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.theme import mark_primary
 from inferential_studio.ui.widgets.flow_layout import flow_row
 from inferential_studio.ui.widgets.plots import (
+    GREY,
     SPLIT_COLOURS,
     SPLIT_NAMES,
     legend,
@@ -465,7 +466,7 @@ class ModelSetupPage(StagePage):
         for boundary in (res.validation_start, res.test_start):
             if boundary is not None:
                 pos = to_epoch_seconds(pd.DatetimeIndex([boundary]))[0]
-                self.split_plot.addItem(pg.InfiniteLine(pos, angle=90, pen=pg.mkPen("#555555", style=Qt.PenStyle.DashLine)))  # fmt: skip
+                self.split_plot.addItem(pg.InfiniteLine(pos, angle=90, pen=pg.mkPen(GREY, style=Qt.PenStyle.DashLine)))  # fmt: skip
         self.split_plot.setLabel("left", f"{fm.target}")
         counts = res.counts()
         msgs.set(

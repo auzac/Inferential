@@ -59,6 +59,9 @@ from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.theme import mark_primary
 from inferential_studio.ui.widgets.flow_layout import flow_row
 from inferential_studio.ui.widgets.plots import (
+    BLUE,
+    GREY,
+    VERMILION,
     clear_placeholder,
     legend,
     note_label,
@@ -518,7 +521,7 @@ class ExportPage(StagePage):
         t = pred.table
         x = to_epoch_seconds(pd.DatetimeIndex(t["time"]))
         ok = (t["status"] == PRED_OK).to_numpy()
-        self.apply_plot.plot(x, np.where(ok, t["prediction"], np.nan), pen=pg.mkPen("#0072B2", width=1.5),
+        self.apply_plot.plot(x, np.where(ok, t["prediction"], np.nan), pen=pg.mkPen(BLUE, width=1.5),
                              connect="finite", name="Prediction")  # fmt: skip
         out = t["n_outside_training_range"].to_numpy() > 0
         if out.any():
@@ -526,7 +529,7 @@ class ExportPage(StagePage):
                 self.apply_plot,
                 x[out],
                 t["prediction"].to_numpy()[out],
-                "#D55E00",
+                VERMILION,
                 "Outside training range",
                 size=6,
             )
@@ -542,7 +545,7 @@ class ExportPage(StagePage):
                 self.apply_plot,
                 to_epoch_seconds(lab.index),
                 lab.to_numpy(),
-                "#555555",
+                GREY,
                 "Lab",
                 size=5,
             )

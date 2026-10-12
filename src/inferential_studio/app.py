@@ -56,9 +56,9 @@ def main(argv: list[str] | None = None) -> int:
     app.setOrganizationName(APP_ID)
 
     from inferential_studio.ui.main_window import MainWindow
-    from inferential_studio.ui.theme import apply_theme
+    from inferential_studio.ui.theme import apply_theme, resolve_theme
 
-    apply_theme(app)
+    apply_theme(app, resolve_theme(settings.theme))
     from PySide6.QtGui import QIcon
 
     from inferential_studio.infrastructure.paths import resource_path

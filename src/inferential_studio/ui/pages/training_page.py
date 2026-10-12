@@ -27,8 +27,12 @@ from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.theme import mark_primary
 from inferential_studio.ui.widgets.data_table import DataTableView
 from inferential_studio.ui.widgets.plots import (
+    BLUE,
+    GREY,
+    ORANGE,
     SPLIT_COLOURS,
     SPLIT_NAMES,
+    VERMILION,
     bar_chart,
     legend,
     note_label,
@@ -278,8 +282,8 @@ class TrainingPage(StagePage):
             return
         x = np.log10(cv.values) if cv.parameter == "alpha" else cv.values
         self.cv_plot.setLabel("bottom", "log10(alpha)" if cv.parameter == "alpha" else "Components")
-        self.cv_plot.plot(x, cv.mean_rmse, pen=pg.mkPen("#0072B2", width=2), symbol="o", symbolSize=5,
-                          symbolBrush="#0072B2")  # fmt: skip
+        self.cv_plot.plot(x, cv.mean_rmse, pen=pg.mkPen(BLUE, width=2), symbol="o", symbolSize=5,
+                          symbolBrush=BLUE)  # fmt: skip
         err = pg.ErrorBarItem(x=x, y=cv.mean_rmse, height=2 * cv.se_rmse, pen=pg.mkPen("#7FB2D9"))
         self.cv_plot.addItem(err)
         pick = np.log10(cv.chosen) if cv.parameter == "alpha" else cv.chosen
@@ -287,7 +291,7 @@ class TrainingPage(StagePage):
         i_pick = int(np.flatnonzero(np.isclose(cv.values, cv.chosen))[0])
         i_best = int(np.flatnonzero(np.isclose(cv.values, cv.best))[0])
         scatter(self.cv_plot, [best], [cv.mean_rmse[i_best]], "#999999", size=12, symbol="s")
-        scatter(self.cv_plot, [pick], [cv.mean_rmse[i_pick]], "#D55E00", size=12)
+        scatter(self.cv_plot, [pick], [cv.mean_rmse[i_pick]], VERMILION, size=12)
         self.cv_note.setText(
             f"Chosen {cv.parameter}: {cv.chosen:g} ({cv.rule}); lowest mean CV RMSE at "
             f"{cv.best:g}. Error bars: ± 1 standard error across folds. Folds use only the training "
@@ -330,7 +334,7 @@ class TrainingPage(StagePage):
         if kind == "vip":
             vip = d.vip.sort_values(ascending=False)
             bar_chart(self.load_plot, list(vip.index), vip.to_numpy())
-            self.load_plot.addItem(pg.InfiniteLine(1.0, angle=90, pen=pg.mkPen("#555555", style=Qt.PenStyle.DashLine)))  # fmt: skip
+            self.load_plot.addItem(pg.InfiniteLine(1.0, angle=90, pen=pg.mkPen(GREY, style=Qt.PenStyle.DashLine)))  # fmt: skip
             self.load_plot.setTitle("Variable importance in projection (VIP)")
         else:
             frame = (
@@ -388,15 +392,15 @@ class TrainingPage(StagePage):
         pos = np.arange(1, n + 1)
         if isinstance(d, PlsDetails):
             self.var_plot.addItem(pg.BarGraphItem(x=pos - 0.18, height=100 * d.x_variance_explained, width=0.35,
-                                                  brush="#0072B2", name="X variance"))  # fmt: skip
+                                                  brush=BLUE, name="X variance"))  # fmt: skip
             self.var_plot.addItem(pg.BarGraphItem(x=pos + 0.18, height=100 * d.y_variance_explained, width=0.35,
-                                                  brush="#E69F00", name="Y variance (training)"))  # fmt: skip
+                                                  brush=ORANGE, name="Y variance (training)"))  # fmt: skip
             note = VAR_NOTE[ModelKind.PLS]
         else:
             self.var_plot.addItem(pg.BarGraphItem(x=pos, height=100 * d.x_variance_explained, width=0.6,
-                                                  brush="#0072B2", name="X variance"))  # fmt: skip
+                                                  brush=BLUE, name="X variance"))  # fmt: skip
             note = VAR_NOTE[ModelKind.PCR]
-        self.var_plot.plot(pos, 100 * np.cumsum(d.x_variance_explained), pen=pg.mkPen("#555555", width=1.5),
+        self.var_plot.plot(pos, 100 * np.cumsum(d.x_variance_explained), pen=pg.mkPen(GREY, width=1.5),
                            symbol="o", symbolSize=4, name="Cumulative X variance")  # fmt: skip
         self.var_plot.getAxis("bottom").setTicks([[(int(i), f"{int(i)}") for i in pos]])
         self.var_plot.setLabel("bottom", "Component")
