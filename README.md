@@ -5,13 +5,15 @@ inferential models (soft sensors), starting with distillation columns.
 
 Python · PySide6 (Qt 6) · PyQtGraph · pandas · scikit-learn. No cloud services, no telemetry.
 
-> **Status: v0.5.4 — Milestone 5 + interface polish (release candidate for v1.0.0).** All nine stages work:
+> **Status: v0.5.5 — Milestone 5 + new window shell (release candidate for v1.0.0).** All nine stages work:
 > import, raw EDA, cleaning with reviewable flags, variable selection, per-predictor alignment to
 > lab samples, MLR / PLS / PCR / Ridge with chronological splits and time-aware CV, validation,
 > and export (HTML model card, predictions, JSON model file, batch prediction). Projects can be
 > portable (data embedded), reproduce their saved results on reopening and recover after a crash.
-> Remaining gate for v1.0.0: build and test the installer on a clean Windows PC
-> ([packaging](docs/packaging.md)). See the [user guide](docs/user-guide.md).
+> One seamless window (title bar with menu and commands, sliding stage rail) in a light or dark
+> theme. Remaining gate for v1.0.0: build and test the installer on a clean Windows PC, including
+> the frameless window (snap, multi-monitor, scaling) ([packaging](docs/packaging.md)). See the
+> [user guide](docs/user-guide.md).
 
 ## Quick start (Windows, PowerShell)
 

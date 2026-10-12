@@ -3,6 +3,39 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## v0.5.5 — New window shell and themes (2026-10-12)
+
+### Changed
+- **One seamless window**: the application draws its own title bar, so title bar, commands and
+  page read as one surface (Windows 11 style, rounded corners and snap kept — moving and
+  resizing still go through Windows). The title bar holds:
+  - **≡ menu** (Alt+F) with every command — new, open, open recent, save, save as, save
+    portable copy, import, export, undo, redo, project settings, settings, Help ▸ (user guide,
+    Help panel, example dataset, log folder, about) and exit. It replaces the menu bar.
+  - **Icon buttons** for open, save, save as, import, undo and redo (tooltips give the name,
+    the shortcut and, for undo/redo, the step). They replace the toolbar.
+  - The project name (and "unsaved changes") in the centre, the Help panel toggle, the
+    **light/dark switch**, and minimise / maximise / close.
+- **Stage rail**: the sidebar is a 48 px column of stage icons in workflow order (no numbers).
+  The button at its top slides the names out *over* the page (160 ms) — the page never moves,
+  so charts are not redrawn. Choosing a stage, Esc or a click elsewhere closes it; a click on
+  the page only closes it.
+- **Themes**: Windows dark mode colours or a warm light theme. *Settings → Theme* adds *Follow
+  Windows*, which changes along with Windows. Charts, tables, messages and dialogs follow;
+  data colours are mid-tones that read on both backgrounds. A switch takes a fraction of a
+  second: the stylesheet sits on the window, not the application, so Qt re-styles far less.
+- Fluent UI System Icons (MIT) throughout; check boxes, radio buttons and list check marks
+  restyled to match the theme.
+- Menu items in sentence case, like the rest of the interface.
+- Faster start: the main window builds in less than half the time (same reason).
+
+### Added
+- *Settings → Use the system title bar* (after a restart): the standard Windows frame above the
+  application's title bar, as a fallback for screen readers or window-management tools.
+
+### Fixed
+- Short trend charts no longer draw y-axis labels on top of each other (e.g. "200" over "100").
+
 ## v0.5.4 — Interface finish (2026-10-12)
 
 ### Changed

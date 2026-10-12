@@ -18,9 +18,9 @@ Rules:
 - **Reference mode** (default): source paths may be **relative to the project file's folder**
   (used by the example) or absolute. Each source records the SHA-256 of the file at import; a
   mismatch on opening is reported and the user decides whether to accept the new contents.
-  *Save As* to another folder rewrites relative source paths so they still point at the same
+  *Save as* to another folder rewrites relative source paths so they still point at the same
   files.
-- **Portable mode** (*File → Save Portable Copy…*): the source files are embedded under `data/`.
+- **Portable mode** (*menu ≡ → Save portable copy…*): the source files are embedded under `data/`.
   Saving refuses a file whose checksum differs from the one recorded at import. Opening copies
   the embedded files to the per-user cache (`%LOCALAPPDATA%\InferentialModelStudio\cache`),
   writing only manifest-listed entries with validated names, enforcing sizes while copying and

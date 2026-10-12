@@ -25,7 +25,7 @@ CHANGELOG.md           What changed in each version
 LICENSES.md            Third-party notices (LGPL obligations for Qt / PySide6)
 pyproject.toml         Package metadata, dependencies, entry points, ruff and pytest settings
 requirements-lock.txt  Exact dependency versions used for release builds
-assets/icons/          Application icon (app.ico for Windows, app.png for the window)
+assets/icons/          Application icon (app.ico, app.png); fluent/ = interface icons (MIT)
 docs/                  User guide, methodology, file formats, packaging, benchmarks
 examples/              Synthetic distillation dataset + sample project (artificial data)
 licenses/              LGPL / GPL v3 texts shipped with the app
@@ -82,13 +82,14 @@ Listed in workflow order.
 
 | File | What it does |
 |---|---|
-| `main_window.py` | Menus, sidebar, page stack, Help dock, status bar; open/save/import, detection, training, recovery. **Start here to follow any user action.** |
+| `main_window.py` | Actions, title bar and main menu, stage rail, page stack, Help panel, status bar, theme switching, frameless frame; open/save/import, detection, training, recovery. **Start here to follow any user action.** |
 | `session.py` | The open project + loaded data + derived state (cleaning masks, aligned features, training run); background recomputation and signals that pages listen to. |
-| `stages.py` | The nine workflow stages (titles, goals) shown in the sidebar. |
+| `stages.py` | The nine workflow stages (titles, goals, rail icons), in workflow order. |
 | `commands.py` | Undo/redo: edits replace whole project lists/configs. |
 | `messages.py` | `MessageCenter` (on `session.messages`): every status line, warning and error. Pages call `messages.set(key, level, text)` for a state and `messages.info/warning/error(...)` for an event — never a label in the page. |
 | `help.py` | Per-stage help text (Help panel) and the in-app document viewer (F1). |
-| `theme.py` | Colour tokens, stylesheet, `mark_primary()` for a page's main button. **Change the look here.** |
+| `theme.py` | Light and dark colour tokens, the stylesheet (set on the main window, not the application: much faster to switch), palette, `refresh_widgets()` for a theme switch, `mark_primary()` for a page's main button. **Change the look here.** |
+| `icons.py` | `icon(name, token)`: Fluent SVG icons from `assets/icons/fluent`, recoloured to a theme token and cached. |
 | `import_wizard.py` | The five-step import wizard. |
 | `cleaning_dialogs.py` | Dialogs for exclusions, rules and detectors. |
 | `project_dialog.py`, `settings_dialog.py` | Project settings and application settings dialogs. |
@@ -108,13 +109,16 @@ Listed in workflow order.
 | 8 Validation | `validation_page.py` |
 | 9 Export & Report | `export_page.py` |
 
-`ui/widgets/` — reusable pieces: `message_panel.py` (fixed message log at the bottom),
+`ui/widgets/` — reusable pieces: `title_bar.py` (title bar = ≡ menu, command icons, project
+name, Help panel toggle, `theme_switch.py`, caption buttons), `nav_rail.py` (stage rail that
+slides out over the page), `window_frame.py` (resize grips and Windows 11 corners for the
+frameless window), `message_panel.py` (fixed message log at the bottom),
 `chart_menu.py` (the one right-click menu every chart uses: Copy / Save image; create charts with
 `plots.plot_widget` or `chart_menu.add_plot` so they get it),
 `trend_view.py` (synchronized trend charts: drag-to-zoom, Back, Fit all), `cursor_readout.py`
 (values at cursor), `overlays.py` (exclusion shading), `time_axis.py` (timezone-aware axis),
 `plots.py` (`plot_widget` / `ChartPlotItem`: empty-state message and series key in the chart
-header), `heatmap.py`, `data_table.py` (pandas table view; number formatting in `format_value`,
+header; series colours; `ValueAxis` without overlapping labels), `heatmap.py`, `data_table.py` (pandas table view; number formatting in `format_value`,
 `fit_to_rows` for short summary tables), `flow_layout.py` (button rows that wrap on narrow
 windows), `variable_list.py`, `timezone_combo.py`, `task_progress.py` (status-bar
 progress/cancel).
@@ -156,7 +160,8 @@ Run everything: `pytest` (about 3 minutes). Lint: `ruff check src tests` and `ru
 | Something is slow in the GUI | the page's update method; long work should go through `TaskManager` |
 | Help text on a page | `ui/help.py` |
 | A warning or status message | `session.messages` (`ui/messages.py`), shown by `ui/widgets/message_panel.py` |
-| Colours, fonts, spacing | `ui/theme.py` (`TOKENS`) |
+| Colours, fonts, spacing | `ui/theme.py` (`TOKENS`); a widget that paints itself implements `apply_theme()` |
+| An icon | `ui/icons.py`; add the Fluent SVG to `assets/icons/fluent/` |
 | Chart right-click menu | `ui/widgets/chart_menu.py` |
-| Logs and settings on a PC | `%LOCALAPPDATA%\InferentialModelStudio\` (Tools → Open Log Folder) |
+| Logs and settings on a PC | `%LOCALAPPDATA%\InferentialModelStudio\` (menu ≡ → Help → Open log folder) |
 | Regenerate the example | `inferential-studio-synth --out examples/synthetic_distillation` |

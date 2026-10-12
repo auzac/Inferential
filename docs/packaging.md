@@ -64,8 +64,14 @@ check that the program folder is gone. Outputs: `InferentialModelStudio-<version
    train, validate, reveal the test, export the model card, predictions and model file, save,
    close, reopen (results reproduced), save a portable copy and open it elsewhere.
 4. Check display scaling at 100 %, 150 % and 200 %.
-5. Launch and close several times; check `%LOCALAPPDATA%\InferentialModelStudio\logs`.
-6. Uninstall; confirm the program folder and Start-menu entries are gone.
+5. Window frame (Windows 11 and 10): drag the title bar to move, snap to both halves and to the
+   top (Win+arrows and Snap layouts), resize from every edge and corner, double-click to
+   maximise, minimise from the taskbar, move between monitors with different scaling. Windows 11
+   shows rounded corners and a thin border; Windows 10 a square 1 px border. Switch light/dark,
+   and with *Follow Windows* change the Windows mode. If anything misbehaves, *Settings → Use
+   the system title bar* is the fallback; record it as a bug.
+6. Launch and close several times; check `%LOCALAPPDATA%\InferentialModelStudio\logs`.
+7. Uninstall; confirm the program folder and Start-menu entries are gone.
 
 ## Licensing release gate (PySide6 / Qt under LGPL v3)
 
