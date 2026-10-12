@@ -200,8 +200,14 @@ class MessagePanel(QFrame):
 
     @Slot()
     def apply_theme(self) -> None:
+        """Recolour the level icons; rebuild, keeping the selection and scroll position."""
+        selected = self.list.indexOfTopLevelItem(self.list.currentItem())
+        scroll = self.list.verticalScrollBar().value()
         self._icons = {lvl: level_icon(lvl) for lvl in Level}
         self.refresh()
+        if 0 <= selected < self.list.topLevelItemCount():
+            self.list.setCurrentItem(self.list.topLevelItem(selected))
+        self.list.verticalScrollBar().setValue(scroll)
 
     def refresh(self) -> None:
         self.list.clear()

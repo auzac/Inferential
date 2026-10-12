@@ -302,6 +302,14 @@ def test_charts_show_a_message_until_they_hold_data(qtbot):
     assert item.getAxis("bottom").isVisible()
 
 
+def test_series_colours_match_the_exported_report():
+    from inferential_studio.core import colours
+    from inferential_studio.ui.widgets.plots import BLUE, NEGATIVE, ORANGE, POSITIVE, VERMILION
+
+    assert (BLUE, ORANGE, VERMILION) == (colours.TRAIN, colours.VALIDATION, colours.TEST)
+    assert (POSITIVE, NEGATIVE) == (colours.POSITIVE, colours.NEGATIVE)
+
+
 def test_chart_key_marks_follow_the_series_style(qtbot):
     from inferential_studio.ui.widgets.plots import chart_item, legend, plot_widget, scatter
 

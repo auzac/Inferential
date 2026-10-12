@@ -231,3 +231,75 @@ def test_auto_theme_follows_the_system(window, monkeypatch):
     window.set_theme(theme.LIGHT)  # an explicit choice stops following the system
     window._system_theme_changed()
     assert theme.current_theme() == theme.LIGHT and window.settings.theme == theme.LIGHT
+
+
+def test_rail_keyboard_choice_closes_the_panel(qtbot, window):
+    rail = window.nav
+    rail.set_expanded(True, animate=False)
+    QApplication.sendEvent(
+        rail.list,
+        QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier),
+    )
+    # The keyboard picks the stage (the page follows currentRowChanged) and the panel closes.
+    assert window.stack.currentIndex() == 1
+    assert not rail.expanded
+
+
+def test_escape_reaches_an_open_dialog(qtbot, window):
+    from PySide6.QtWidgets import QDialog
+
+    rail = window.nav
+    rail.set_expanded(True, animate=False)
+    dialog = QDialog(window)
+    qtbot.addWidget(dialog)
+    dialog.open()  # modal
+    qtbot.waitUntil(lambda: QApplication.activeModalWidget() is dialog, timeout=2000)
+    QApplication.sendEvent(
+        dialog,
+        QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier),
+    )
+    assert not dialog.isVisible()  # the dialog took the Esc, the rail stayed out of the way
+    assert rail.expanded
+    QApplication.sendEvent(
+        window.stack,
+        QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier),
+    )
+    assert not rail.expanded
+
+
+def test_long_project_names_are_elided(qtbot, window):
+    window.resize(960, 640)
+    window.session.project.name = "Counter-current distillation top temperature soft sensor "
+    window._update_title()
+    label = window.title_bar.title
+    assert label.isVisible() and "…" in label.text()
+    assert label.geometry().right() <= window.width()
+    window.session.project.name = "Plant A"  # short names fit in full
+    window._update_title()
+    assert "…" not in window.title_bar.title.text()
+
+
+def test_theme_choice_survives_a_quick_close(qtbot, window, monkeypatch):
+    from inferential_studio.ui import main_window as mw
+
+    saved = []
+    monkeypatch.setattr(mw, "save_settings", lambda s: saved.append(s))
+    theme.apply_theme(QApplication.instance(), theme.LIGHT)
+    window.set_theme(theme.LIGHT)
+    window.title_bar.theme_switch.click()  # → dark, once the knob animation has run
+    assert window._theme_timer.isActive()
+    window.close()  # before the timer fires: the choice must still be persisted
+    assert window.settings.theme == theme.DARK
+    assert saved == [window.settings]
+
+
+def test_caption_buttons_sit_above_the_resize_grips(window):
+    close = window.title_bar.close_button
+    for offset in (QPoint(23, 2), QPoint(10, 38)):  # top edge and middle of the button
+        assert window.childAt(close.mapTo(window, offset)) is close
+
+
+def test_menu_highlight_differs_from_the_menu_background():
+    for name in (theme.LIGHT, theme.DARK):
+        t = theme.THEMES[name]
+        assert t["menu_hover"] != t["surface"]  # the highlighted row must read on menus

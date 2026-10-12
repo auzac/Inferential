@@ -17,6 +17,7 @@ cannot leak into Fusion (white-on-light text, inconsistent selection after focus
 
 from __future__ import annotations
 
+import logging
 import tempfile
 from html import escape
 from pathlib import Path
@@ -40,6 +41,8 @@ DARK = "dark"
 AUTO = "auto"
 THEME_NAMES = {LIGHT: "Light", DARK: "Dark"}
 
+log = logging.getLogger(__name__)
+
 THEMES: dict[str, dict[str, str]] = {
     # Warm off-white paper tones with a terracotta accent.
     LIGHT: {
@@ -54,6 +57,7 @@ THEMES: dict[str, dict[str, str]] = {
         "text_muted": "#68645a",
         "text_faint": "#9d988c",
         "hover": "#e5e2d8",  # subtle fill on the base layer
+        "menu_hover": "#e5e2d8",  # menu row highlight (menus sit on ``surface``)
         "selected": "#e0dccf",
         "accent": "#c15f3c",
         "accent_hover": "#ad5434",
@@ -86,6 +90,7 @@ THEMES: dict[str, dict[str, str]] = {
         "text_muted": "#c5c5c5",
         "text_faint": "#8f8f8f",
         "hover": "#2d2d2d",
+        "menu_hover": "#3a3a3a",  # lighter than ``surface``: the highlight must read on menus
         "selected": "#333333",
         "accent": "#4cc2ff",
         "accent_hover": "#47b1e8",
@@ -133,7 +138,7 @@ QToolTip {{ background: {t["surface"]}; color: {t["text"]}; border: 1px solid {t
             padding: 4px 6px; }}
 QMenu {{ background: {t["surface"]}; border: 1px solid {t["border_strong"]}; padding: 4px; }}
 QMenu::item {{ padding: 6px 28px 6px 10px; color: {t["text"]}; border-radius: 4px; }}
-QMenu::item:selected {{ background: {t["hover"]}; }}
+QMenu::item:selected {{ background: {t["menu_hover"]}; }}
 QMenu::item:disabled {{ color: {t["text_faint"]}; }}
 QMenu::icon {{ padding-left: 8px; }}
 QMenu::separator {{ height: 1px; background: {t["border"]}; margin: 4px 6px; }}
@@ -310,10 +315,16 @@ def _palette(t: dict[str, str]) -> QPalette:
     return palette
 
 
+def _save_image(path: Path, img: QImage) -> None:
+    """Write one theme asset; raise OSError on failure (stylesheet() falls back)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not img.save(str(path)) or not path.exists():
+        raise OSError(f"cannot write theme asset {path}")
+
+
 def _arrow_images(name: str, t: dict[str, str]) -> dict[str, str]:
     """Small arrow PNGs for combo boxes, spin boxes and tab scrollers (QSS needs files)."""
     folder = Path(tempfile.gettempdir()) / "inferential_studio_theme" / name
-    folder.mkdir(parents=True, exist_ok=True)
     out = {}
     for arrow, points in {
         "down": ((1, 3), (9, 3), (5, 8)),
@@ -332,7 +343,7 @@ def _arrow_images(name: str, t: dict[str, str]) -> dict[str, str]:
                 painter.setBrush(QColor(colour))
                 painter.drawPolygon(QPolygonF([QPointF(x, y) for x, y in points]))
                 painter.end()
-                img.save(str(path))
+                _save_image(path, img)
             out[f"{arrow}{state}"] = path.as_posix()
     return out
 
@@ -340,7 +351,6 @@ def _arrow_images(name: str, t: dict[str, str]) -> dict[str, str]:
 def _indicator_images(name: str, t: dict[str, str]) -> dict[str, str]:
     """Check-mark and dash PNGs (1x and @2x) for checked check boxes, list items and menus."""
     folder = Path(tempfile.gettempdir()) / "inferential_studio_theme" / name
-    folder.mkdir(parents=True, exist_ok=True)
     out = {}
     colour = t["on_accent"]
     shapes = {
@@ -364,7 +374,7 @@ def _indicator_images(name: str, t: dict[str, str]) -> dict[str, str]:
                     painter.setPen(pen)
                     painter.drawPolyline(QPolygonF([QPointF(x * k, y * k) for x, y in points]))
                     painter.end()
-                    img.save(str(path))
+                    _save_image(path, img)
             out[f"{shape}{box}"] = (folder / f"{stem}.png").as_posix()
     return out
 
@@ -467,11 +477,12 @@ def _font_set(app: QApplication) -> bool:
 
 def stylesheet() -> str:
     """The current theme's stylesheet, for the main window (see apply_theme)."""
-    return (
-        build_stylesheet(TOKENS)
-        + _arrow_stylesheet(_current, TOKENS)
-        + _indicator_stylesheet(_current, TOKENS)
-    )
+    base = build_stylesheet(TOKENS)
+    try:
+        return base + _arrow_stylesheet(_current, TOKENS) + _indicator_stylesheet(_current, TOKENS)
+    except OSError as exc:  # TEMP unavailable or read-only: Qt draws default arrows/indicators
+        log.warning("Theme image assets unavailable (%s); using the unstyled fallback", exc)
+        return base
 
 
 def refresh_widgets(root: QWidget) -> None:

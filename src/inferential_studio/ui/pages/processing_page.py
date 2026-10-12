@@ -438,6 +438,13 @@ class ProcessingPage(StagePage):
                 text = f"{int((fm.status[name].to_numpy()[usable] == OK).sum()):,}"
             self.table.setItem(r, len(COLUMNS) - 1, _item(text))
 
+    def apply_theme(self) -> None:
+        """Re-apply the error colour cached in the table cells (see ui/theme.py)."""
+        for r, spec in enumerate(self.specs()[: self.table.rowCount()]):
+            item = self.table.item(r, 11)
+            if item is not None and not spec.is_causal:
+                item.setForeground(theme_colour("error"))
+
     @Slot()
     def _selection_changed(self) -> None:
         self._load_form()

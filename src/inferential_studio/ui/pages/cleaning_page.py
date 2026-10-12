@@ -751,6 +751,21 @@ class CleaningPage(StagePage):
                 t.setItem(r, c, cell)
         t.blockSignals(False)
 
+    def apply_theme(self) -> None:
+        """Re-apply the error colour cached in the rules table cells (see ui/theme.py)."""
+        state = self._session.cleaning
+        errors = state.rule_errors if state else {}
+        last = self.rules_table.columnCount() - 1
+        for r in range(self.rules_table.rowCount()):
+            key = self.rules_table.item(r, 0)
+            cell = self.rules_table.item(r, last)
+            if (
+                key is not None
+                and cell is not None
+                and key.data(Qt.ItemDataRole.UserRole) in errors
+            ):
+                cell.setForeground(theme_colour("error"))
+
     def _rule_toggled(self, item: QTableWidgetItem) -> None:
         if item.column() != 0:
             return

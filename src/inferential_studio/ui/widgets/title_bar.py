@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from inferential_studio.ui.icons import icon
 from inferential_studio.ui.theme import TOKENS
 from inferential_studio.ui.widgets.theme_switch import ThemeSwitch
+from inferential_studio.ui.widgets.window_frame import GRIP
 
 HEIGHT = 40
 CAPTION_ICON = 16
@@ -152,7 +153,21 @@ class TitleBar(QWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
         if self._frameless and event.button() == Qt.MouseButton.LeftButton:
             handle = self.window().windowHandle()
-            if handle is not None and handle.startSystemMove():
+            if handle is not None:
+                # The edge grips sit under the title bar so the caption buttons keep every
+                # pixel; the bar's own top strip (and corners) still resizes the window.
+                pos = event.position().toPoint()
+                corner = GRIP * 2
+                if pos.y() < GRIP:
+                    if pos.x() < corner:
+                        edges = Qt.Edge.TopEdge | Qt.Edge.LeftEdge
+                    elif pos.x() > self.width() - corner:
+                        edges = Qt.Edge.TopEdge | Qt.Edge.RightEdge
+                    else:
+                        edges = Qt.Edge.TopEdge
+                    handle.startSystemResize(edges)
+                else:
+                    handle.startSystemMove()
                 event.accept()
                 return
         super().mousePressEvent(event)
@@ -199,12 +214,20 @@ class TitleBar(QWidget):
         """Centre the title on the window; never overlap the buttons on either side."""
         left_end = self._left.geometry().right() + 16
         right_start = self._right.geometry().left() - 16
+        available = max(right_start - left_end, 0)
+        if available <= 40:
+            self.title.setVisible(False)
+            return
+        self.title.setText(self._title_html)  # full rich text; elided below when it is too long
         width = self.title.sizeHint().width()
-        x = (self.width() - width) // 2
-        x = max(x, left_end)
-        available = max(right_start - x, 0)
-        self.title.setGeometry(x, 0, min(width, available), self.height())
-        self.title.setVisible(available > 40)
+        if width > available:  # a long project name: elide instead of clipping mid-glyph
+            plain = escape(" — ".join(p for p in self._title_text if p))
+            metrics = self.title.fontMetrics()
+            self.title.setText(metrics.elidedText(plain, Qt.TextElideMode.ElideRight, available))
+            width = min(self.title.sizeHint().width(), available)
+        x = max((self.width() - width) // 2, left_end)
+        self.title.setGeometry(x, 0, width, self.height())
+        self.title.setVisible(True)
 
     def _minimise(self) -> None:
         self.window().showMinimized()

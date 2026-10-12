@@ -14,23 +14,25 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextOption
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
+from inferential_studio.core import colours
 from inferential_studio.core.splits import PURGED, TEST, TRAIN, VALIDATION
 from inferential_studio.ui.theme import TOKENS
 from inferential_studio.ui.widgets.chart_menu import ChartViewBox, tidy_plot
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem
 
 # Colour-blind-safe series colours (Okabe–Ito hues, lightness adjusted so every colour keeps
-# contrast on both the light and the dark chart background).
-BLUE = "#2F8FD8"
-ORANGE = "#E69F00"
+# contrast on both the light and the dark chart background). The split colours are shared
+# with the exported model-card SVGs (core/colours.py).
+BLUE = colours.TRAIN
+ORANGE = colours.VALIDATION
 GREEN = "#14A37F"
-VERMILION = "#E0632B"
+VERMILION = colours.TEST
 PINK = "#C978A9"
 SKY = "#5BB7E8"
 OLIVE = "#C9B23A"
 GREY = "#8C8C8C"  # reference lines, lab values shown for comparison
 SERIES = [BLUE, ORANGE, GREEN, VERMILION, PINK, SKY, OLIVE, GREY]
-FAINT = "#8C8C8C66"  # de-emphasised points (e.g. not eligible)
+FAINT = "#8C8C8C"  # de-emphasised points (e.g. "not eligible"): scatter() paints it at 40%
 
 SPLIT_COLOURS = {
     TRAIN: BLUE,
@@ -332,7 +334,7 @@ def legend(plot: pg.PlotWidget, corner: str = "top-left") -> None:  # noqa: ARG0
 def scatter(plot: pg.PlotItem | pg.PlotWidget, x, y, colour: str, name: str | None = None,  # noqa: ANN001
             size: int = 6, symbol: str = "o") -> pg.PlotDataItem:  # fmt: skip
     c = pg.mkColor(colour)
-    c.setAlpha(190)
+    c.setAlpha(102 if colour == FAINT else 190)
     return plot.plot(
         np.asarray(x, dtype=float), np.asarray(y, dtype=float), pen=None, symbol=symbol,
         symbolSize=size, symbolBrush=pg.mkBrush(c), symbolPen=None, name=name,

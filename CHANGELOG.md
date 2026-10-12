@@ -35,6 +35,13 @@ production release is `v1.0.0`.
 
 ### Fixed
 - Short trend charts no longer draw y-axis labels on top of each other (e.g. "200" over "100").
+- Review fixes: the menu highlight reads on the dark theme; the caption buttons are clickable
+  to the window edge; Esc reaches an open dialog before closing the stage rail; keyboard stage
+  choices close the rail; a theme change made just before closing is kept; the title bar shows
+  the project path on hover and elides long names; error cells, sub-menu icons and the message
+  panel follow a theme switch (without losing the selection); the exported model card uses the
+  same series colours as the app; "not eligible" points sit further back; the app still opens
+  when the temporary theme assets cannot be written.
 
 ## v0.5.4 — Interface finish (2026-10-12)
 

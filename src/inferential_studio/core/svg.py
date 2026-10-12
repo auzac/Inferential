@@ -9,6 +9,8 @@ from html import escape
 import numpy as np
 import pandas as pd
 
+from inferential_studio.core import colours
+
 FONT = "font-family:Segoe UI,Arial,sans-serif;font-size:11px;fill:#333"
 GRID = "#e6e6e6"
 
@@ -177,7 +179,7 @@ def bar_chart(labels: list[str], values: list[float], *, width: int = 900, title
     for i, (name, v) in enumerate(zip(labels, vals, strict=True)):
         y = top + i * row
         x_a, x_b = sorted((zero, px(v)))
-        colour = "#0072B2" if v >= 0 else "#D55E00"
+        colour = colours.POSITIVE if v >= 0 else colours.NEGATIVE
         out.append(
             f'<text x="{left - 6}" y="{y + 15}" text-anchor="end" style="{FONT}">{escape(name)}</text>'
         )

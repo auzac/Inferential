@@ -109,6 +109,8 @@ THEME_SWITCH_DELAY_MS = 150  # the switch's knob animation runs first
 class MainWindow(QMainWindow):
     def __init__(self, settings: AppSettings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.grips = None  # EdgeGrips after the central widgets; early events must see it
+        self.title_bar = None  # built by _build_title_bar; _update_frame guards for early events
         self.settings = settings
         self.session = ProjectSession(self)
         self.tasks = TaskManager(self)
@@ -278,6 +280,11 @@ class MainWindow(QMainWindow):
     def _apply_action_icons(self) -> None:
         for act, name in self._action_icons.items():
             act.setIcon(icon(name))
+        # The sub-menus keep the icon they were created with; colour them like their actions.
+        if hasattr(self, "recent_menu"):
+            self.recent_menu.setIcon(icon("history"))
+        if hasattr(self, "help_menu"):
+            self.help_menu.setIcon(icon("question_circle"))
 
     def _undo_tooltips(self, _text: str = "") -> None:
         try:
@@ -325,14 +332,18 @@ class MainWindow(QMainWindow):
         )
         self.title_bar.theme_switch.set_dark(current_theme() == DARK)
         # Let the knob finish sliding before the (brief) recolouring of the window; quick
-        # repeated clicks restart the wait, so only the final state is applied.
+        # repeated clicks restart the wait, so only the final state is applied. (toggled
+        # carries the check state: without the lambda it would become the timer's interval.)
         self._theme_timer = QTimer(self, singleShot=True, interval=THEME_SWITCH_DELAY_MS)
         self._theme_timer.timeout.connect(self._apply_switch_theme)
-        self.title_bar.theme_switch.toggled.connect(self._theme_timer.start)
+        self.title_bar.theme_switch.toggled.connect(
+            lambda _checked: self._theme_timer.start(THEME_SWITCH_DELAY_MS)
+        )
         app = QApplication.instance()
         if app is not None:  # "auto" follows Windows when its light/dark mode changes
             app.styleHints().colorSchemeChanged.connect(self._system_theme_changed)
         self.setMenuWidget(self.title_bar)
+        self._apply_action_icons()  # sub-menu icons were not built yet at the first pass
         QShortcut(QKeySequence("Alt+F"), self, activated=self._open_main_menu)
 
     def _open_main_menu(self) -> None:
@@ -448,7 +459,8 @@ class MainWindow(QMainWindow):
 
     def _build_status_bar(self) -> None:
         status = self.statusBar()
-        status.setSizeGripEnabled(False)  # every edge of the window resizes it
+        # Frameless: every edge of the window resizes it. System frame: keep the OS size grip.
+        status.setSizeGripEnabled(not self.frameless)
         self.lbl_records = QLabel()
         self.lbl_samples = QLabel()
         self.lbl_exclusions = QLabel()
@@ -467,7 +479,9 @@ class MainWindow(QMainWindow):
             name + (" (unsaved changes)" if self.session.dirty else ""), APP_NAME
         )
         path = self.session.path
-        self.title_bar.title.setToolTip(str(path) if path else "Not saved yet")
+        # The label is transparent to mouse events (dragging works everywhere), so the
+        # tooltip sits on the bar: hovering the title shows the full project path.
+        self.title_bar.setToolTip(str(path) if path else "Not saved yet")
 
     @Slot()
     def _refresh_status(self) -> None:
@@ -963,6 +977,9 @@ class MainWindow(QMainWindow):
             self.tasks.cancel_all()
             if not self.tasks.wait_for_done(5000):
                 log.warning("Background tasks did not stop within 5 s at shutdown")
+        if self._theme_timer.isActive():  # a switch clicked just before closing: keep the choice
+            self._theme_timer.stop()
+            self.settings.theme = DARK if self.title_bar.theme_switch.isChecked() else LIGHT
         self._remember_window()
         save_settings(self.settings)
         self.recovery.discard()  # closed normally: nothing to recover
@@ -1035,7 +1052,8 @@ class MainWindow(QMainWindow):
         self.setContentsMargins(m, m, m, m)
         if self.grips is not None:
             self.grips.set_enabled(normal)
-        self.title_bar.update_window_state()
+        if self.title_bar is not None:
+            self.title_bar.update_window_state()
         self.update()
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override

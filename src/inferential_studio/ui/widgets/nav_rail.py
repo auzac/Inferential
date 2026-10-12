@@ -122,6 +122,9 @@ class NavRail(QWidget):
             item.setSizeHint(QSize(EXPANDED_WIDTH, ITEM_HEIGHT))
             self.list.addItem(item)
         self.list.itemClicked.connect(lambda _item: self.set_expanded(False))
+        # Keyboard choices pick a stage too (clicks close via itemClicked; the page follows
+        # currentRowChanged in the main window).
+        self.list.currentRowChanged.connect(self._row_changed)
 
         self._anim = QVariantAnimation(self)
         self._anim.setDuration(ANIMATION_MS)
@@ -204,9 +207,15 @@ class NavRail(QWidget):
                 and shell.rect().contains(shell.mapFromGlobal(where))
             )
         elif event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
+            if QApplication.activeModalWidget() is not None:
+                return False  # a dialog owns the keyboard: it gets the Esc, the panel stays
             self.set_expanded(False)
             return True
         return False
+
+    def _row_changed(self, _row: int) -> None:
+        if self._expanded:
+            self.set_expanded(False)
 
     # -- internals ------------------------------------------------------------------------
 

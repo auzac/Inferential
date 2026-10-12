@@ -331,7 +331,9 @@ def test_title_shows_project_name_and_unsaved_state(qtbot, window, example_copy)
     name = window.session.project.name
     assert name in title.text() and "unsaved" not in title.text()
     assert "Inferential Model Studio" in title.text()
-    assert title.toolTip().endswith("sample_project.imsproj")
+    # The label is transparent to mouse events (dragging works everywhere), so the tooltip
+    # with the full path sits on the bar itself.
+    assert window.title_bar.toolTip().endswith("sample_project.imsproj")
     window.session._set_dirty(True)
     assert f"{name} (unsaved changes)" in title.text()
     window.session._set_dirty(False)

@@ -12,7 +12,7 @@ import ctypes
 import logging
 import sys
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QEvent, QObject, QRect, Qt
 from PySide6.QtGui import QColor, QMouseEvent
 from PySide6.QtWidgets import QWidget
 
@@ -48,6 +48,38 @@ class _Grip(QWidget):
         super().mousePressEvent(event)
 
 
+class _StatusBarResizeFilter(QObject):
+    """Restore edge and corner resizing on the empty parts of the status bar.
+
+    The grips sit *under* the status bar so its widgets (the Cancel button) keep every pixel;
+    a press on the bar's own bottom strip starts the system resize instead.
+    """
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt override
+        if (
+            not isinstance(event, QMouseEvent)
+            or event.button() != Qt.MouseButton.LeftButton
+            or not isinstance(watched, QWidget)
+        ):
+            return False
+        if watched.childAt(event.position().toPoint()) is not None:
+            return False  # a widget (Cancel, a label) owns the press
+        if event.position().y() < watched.height() - GRIP:
+            return False
+        handle = watched.window().windowHandle()
+        if handle is None:
+            return False
+        x = event.position().x()
+        corner = GRIP * 2
+        if x < corner:
+            edges = Qt.Edge.BottomEdge | Qt.Edge.LeftEdge
+        elif x > watched.width() - corner:
+            edges = Qt.Edge.BottomEdge | Qt.Edge.RightEdge
+        else:
+            edges = Qt.Edge.BottomEdge
+        return handle.startSystemResize(edges)
+
+
 class EdgeGrips:
     """Eight invisible strips along the edges and corners of a frameless window."""
 
@@ -56,11 +88,18 @@ class EdgeGrips:
         self.grips = {
             name: _Grip(edges, cursor, window) for name, (edges, cursor) in _EDGES.items()
         }
-        self._enabled = True
+        self._bar_filter = _StatusBarResizeFilter()
+        self.set_enabled(True)
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
         self.update_geometry()
+        bar = self._window.statusBar()
+        if bar is not None:
+            if enabled:
+                bar.installEventFilter(self._bar_filter)
+            else:
+                bar.removeEventFilter(self._bar_filter)
 
     def update_geometry(self) -> None:
         w, h = self._window.width(), self._window.height()
@@ -80,6 +119,12 @@ class EdgeGrips:
             grip.setVisible(self._enabled)
             if self._enabled:
                 grip.raise_()
+        # Interactive bars sit above the strips so their buttons keep every pixel. The title
+        # bar restores top-edge resizing itself and _StatusBarResizeFilter the bottom edge.
+        if self._enabled:
+            for bar in (self._window.menuWidget(), self._window.statusBar()):
+                if bar is not None:
+                    bar.raise_()
 
 
 def round_windows_corners(window: QWidget, border: str) -> bool:
