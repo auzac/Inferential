@@ -374,6 +374,8 @@ def test_project_settings_change_display_timezone(qtbot, window):
 
 
 def test_title_shows_project_name_and_unsaved_state(qtbot, window, example_copy):
+    # The full title needs room: the bar elides it on narrow windows (checked at the end).
+    window.resize(1280, 800)
     title = window.title_bar.title
     assert (window.session.project.name or "Untitled project") in title.text()
     open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
@@ -387,3 +389,9 @@ def test_title_shows_project_name_and_unsaved_state(qtbot, window, example_copy)
     assert f"{name} (unsaved changes)" in title.text()
     window.session._set_dirty(False)
     assert window.pages["import"].findChild(QLabel, "pageEyebrow").text() == "Stage 1 of 9"
+    # A narrow window elides the title instead of clipping it; the full path stays in the tooltip.
+    window.resize(900, 700)
+    qtbot.waitUntil(lambda: title.text().endswith("…"), timeout=2000)
+    assert title.text().startswith(name[:10])
+    assert title.geometry().right() < window.title_bar.help_button.geometry().left()
+    assert window.title_bar.toolTip().endswith("sample_project.imsproj")
