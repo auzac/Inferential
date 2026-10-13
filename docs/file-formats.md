@@ -1,14 +1,14 @@
 # File formats
 
-## Project file (`.imsproj`), schema version 5
+## Project file (`.imsproj`), schema version 6
 
 A ZIP archive with these entries (anything else is rejected when opening):
 
 | Entry | Content |
 |---|---|
 | `manifest.json` | `format` = `"inferential-model-studio-project"`, `schema_version`, `app_version`, `saved_at` (UTC ISO 8601), `libraries` (Python, NumPy, pandas, SciPy, scikit-learn versions), `storage` (`"reference"` or `"portable"`), `embedded` (list of `{source_id, entry, sha256, size}`) |
-| `project.json` | The project configuration (see `core/schemas.py`): name, display timezone, data sources, variables, per-predictor feature settings, manual exclusions, rules, detectors, flag decisions, alignment options, modelling configuration (scaling, split, CV, candidate models), model-card details (`report`), notes, created/modified times |
-| `results.json` | Optional: summary of the last (up-to-date) training run — per model hyperparameters, intercept, coefficients and metrics (final-test metrics only if revealed), split counts, whether the final test was revealed, versions. Used to check that reopening reproduces the results. |
+| `project.json` | The project configuration (see `core/schemas.py`): name, display timezone, data sources, variables, per-predictor feature settings, manual exclusions, rules, detectors, flag decisions, alignment options, modelling configuration (scaling, split, CV, candidate models, optional input-subset search), model-card details (`report`), notes, created/modified times |
+| `results.json` | Optional: summary of the last (up-to-date) training run — per-candidate inputs, hyperparameters, intercept, coefficients and metrics (final-test metrics only if revealed for the selected candidate), selected candidate, split counts, whether the final test was revealed, versions. Used to check that reopening reproduces the results. |
 | `data/<source id>/<file name>` | Portable projects only: byte-exact copies of the source files |
 
 Rules:
@@ -35,7 +35,7 @@ Schema history: **1** (v0.0.1) initial; **2** (v0.1.0) adds `TimestampKind.nativ
 cells), `DataSource.duplicate_policy` and `DataSource.sample_id_column`; **3** (v0.2.0) adds `rules`
 (typed condition trees), `detectors` and `flag_decisions`; **4** (v0.4.0) adds `alignment` and
 `modelling`; **5** (v0.5.0) adds the `report` details, optional `results.json`, embedded data
-and the `storage`/`embedded` manifest fields. Older files are upgraded automatically on opening
+and the `storage`/`embedded` manifest fields; **6** adds optional input-subset search. Older files are upgraded automatically on opening
 (defaults are used for new sections).
 
 ## Model file (`.imsmodel`), artifact version 1

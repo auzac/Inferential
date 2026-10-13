@@ -251,6 +251,7 @@ def test_modelling_settings_roundtrip(tmp_path, project):
         ),
         models=(ModelSpec(ModelKind.PLS, n_components=3), ModelSpec(ModelKind.RIDGE, alpha=0.5)),
         one_standard_error=False,
+        search_subsets=True,
     )
     project = replace(project, modelling=cfg)
     save_project(project, tmp_path / "m.imsproj")

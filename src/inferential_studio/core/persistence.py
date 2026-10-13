@@ -360,8 +360,15 @@ def _v4_to_v5(project_data: Any) -> Any:
     return project_data
 
 
+def _v5_to_v6(project_data: Any) -> Any:
+    """v6 added opt-in predictor subset search; old projects keep it disabled."""
+    return project_data
+
+
 # Map "from version" -> function converting project JSON to version + 1.
-_MIGRATIONS: dict[int, Any] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5}
+_MIGRATIONS: dict[int, Any] = {
+    1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6
+}
 
 
 def migrate(project_data: Any, from_version: int) -> Any:

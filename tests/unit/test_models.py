@@ -11,6 +11,7 @@ from inferential_studio.core.models import (
     affine_coefficients,
     autocorrelation,
     effective_sample_size,
+    evaluate_final_test,
     make_pipeline,
     regression_metrics,
     train_models,
@@ -246,6 +247,31 @@ def test_test_split_cannot_influence_training():
         assert ma.cv_rmse == pytest.approx(mb.cv_rmse)
         pd.testing.assert_series_equal(ma.metrics.loc[TRAIN], mb.metrics.loc[TRAIN])
     pd.testing.assert_frame_equal(a.train_ranges, b.train_ranges)
+
+
+def test_subset_search_uses_cv_and_defers_test_until_selection():
+    X, y = linear_data(n=220)
+    config = ModellingConfig(
+        models=(ModelSpec(ModelKind.MLR),), search_subsets=True
+    )
+    run = train_models(make_fm(X, y), config)
+    assert run.search_subsets
+    assert len(run.models) == 7
+    assert {len(m.features) for m in run.models} == {1, 2, 3}
+    assert run.selected_model_name == run.comparison().index[0]
+    assert run.comparison().index.tolist() == run.comparison().sort_values("cv_rmse").index.tolist()
+    for model in run.models:
+        assert model.metrics.loc[TEST, "n"] == 0
+        assert TEST not in set(model.predictions["split"])
+        assert model.metrics.loc[VALIDATION, "n"] == (run.split.labels == VALIDATION).sum()
+
+    evaluate_final_test(run, run.selected_model_name)
+    winner = next(m for m in run.models if m.name == run.selected_model_name)
+    assert winner.metrics.loc[TEST, "n"] == (run.split.labels == TEST).sum()
+    assert TEST in set(winner.predictions["split"])
+    for model in run.models:
+        if model is not winner:
+            assert model.metrics.loc[TEST, "n"] == 0
 
 
 def test_invalid_situations_reported():
