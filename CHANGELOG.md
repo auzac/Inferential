@@ -3,6 +3,12 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## Unreleased
+
+### Changed
+- Clicking a variable name toggles its checkbox in EDA, cleaning, predictor selection and
+  cleaning dialogs. Checkbox clicks and keyboard selection remain available.
+
 ## v0.5.7 — Lag sensitivity correctness (2026-10-13)
 
 ### Changed

@@ -2,8 +2,43 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QLabel, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtWidgets import (
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QStyledItemDelegate,
+    QVBoxLayout,
+    QWidget,
+)
+
+
+class _VariableCheckDelegate(QStyledItemDelegate):
+    def editorEvent(self, event, model, option, index):  # noqa: N802 - Qt override
+        if (
+            event.type() == QEvent.Type.MouseButtonRelease
+            and event.button() == Qt.MouseButton.LeftButton
+            and option.rect.contains(event.position().toPoint())
+            and index.flags() & Qt.ItemFlag.ItemIsEnabled
+            and index.flags() & Qt.ItemFlag.ItemIsUserCheckable
+        ):
+            state = index.data(Qt.ItemDataRole.CheckStateRole)
+            checked = state == Qt.CheckState.Checked or state == Qt.CheckState.Checked.value
+            return model.setData(
+                index,
+                Qt.CheckState.Unchecked.value if checked else Qt.CheckState.Checked.value,
+                Qt.ItemDataRole.CheckStateRole,
+            )
+        return super().editorEvent(event, model, option, index)
+
+
+class CheckableVariableList(QListWidget):
+    """Variable names and their checkboxes share the same click target."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setItemDelegate(_VariableCheckDelegate(self))
 
 
 class VariableList(QWidget):
@@ -14,7 +49,7 @@ class VariableList(QWidget):
         self.search = QLineEdit()
         self.search.setPlaceholderText("Filter variables…")
         self.search.textChanged.connect(self._filter)
-        self.list = QListWidget()
+        self.list = CheckableVariableList()
         self.list.itemChanged.connect(lambda _i: self.selection_changed.emit())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
