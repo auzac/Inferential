@@ -66,7 +66,7 @@ from inferential_studio.core.timestamps import (
     spec_from_candidate,
 )
 from inferential_studio.ui.theme import TOKENS, tinted
-from inferential_studio.ui.widgets.data_table import DataTableView
+from inferential_studio.ui.widgets.data_table import ColumnFiller, DataTableView
 from inferential_studio.ui.widgets.timezone_combo import TimezoneCombo
 
 DELIMITERS = [("Comma ( , )", ","), ("Semicolon ( ; )", ";"), ("Tab", "\t"), ("Pipe ( | )", "|")]
@@ -566,8 +566,12 @@ class ColumnsPage(QWizardPage):
         self.table.setHorizontalHeaderLabels(
             ["Import", "Column in file", "Variable name", "Role", "Units", "Numeric in preview"]
         )
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        # Headers over their values, left-aligned like the cells (Qt centres them by default).
+        self.table.horizontalHeader().setDefaultAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.filler = ColumnFiller(self.table)  # keeps the columns filling the dialog
         self.table.verticalHeader().setVisible(False)
         self.message = QLabel()
         self.message.setWordWrap(True)
@@ -639,6 +643,7 @@ class ColumnsPage(QWizardPage):
                 pct.setForeground(QColor(TOKENS["error"]))
             self.table.setItem(row, 5, pct)
         self.table.blockSignals(False)
+        self.filler.refit()
         self.completeChanged.emit()
 
     def _check_all(self, checked: bool) -> None:

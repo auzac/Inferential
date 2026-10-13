@@ -72,10 +72,15 @@ class ImportPage(StagePage):
         self.sources.setHorizontalHeaderLabels(
             ["Source", "Type", "File", "Rows", "From", "To", "Status"]
         )
-        self.sources.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
+        header = self.sources.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # File paths are the long content here, so that column takes the spare width...
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        # ...and its header stays over the paths instead of floating mid-column.
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.sources.horizontalHeaderItem(3).setTextAlignment(  # Rows are right-aligned
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
-        self.sources.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.sources.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.sources.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.sources.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)

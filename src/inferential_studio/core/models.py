@@ -655,6 +655,15 @@ def _train_one(
                     spec, config.scaling, X_tr, y_tr, folds, config.one_standard_error, cancel
                 )
                 params["components"] = int(result.cv.chosen)
+                # 1 component is a natural floor; a best value at a *user* maximum below the
+                # possible number suggests more components would do better.
+                if result.cv.best == result.cv.values.max() == spec.max_components and (
+                    spec.max_components < cap
+                ):
+                    result.warnings.append(
+                        f"Cross-validation was best at the maximum of {int(result.cv.best)} "
+                        "components tried; allow more components to check whether it improves."
+                    )
         else:
             if spec.alpha is not None:
                 params["alpha"] = spec.alpha
@@ -665,6 +674,12 @@ def _train_one(
                     spec, config.scaling, X_tr, y_tr, folds, config.one_standard_error, cancel
                 )
                 params["alpha"] = result.cv.chosen
+                if result.cv.best in (result.cv.values.min(), result.cv.values.max()):
+                    result.warnings.append(
+                        f"Cross-validation was best at the edge of the alpha range tried "
+                        f"(alpha {result.cv.best:.3g}); widen the range — the best value may lie "
+                        "outside it."
+                    )
         kw = (
             {"n_components": int(params["components"])}
             if "components" in params

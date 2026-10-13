@@ -11,14 +11,17 @@ Definitions (plain-language versions are shown in the UI):
 * ``iqr``: x < Q1 − k·IQR or x > Q3 + k·IQR.
   For these three the statistics can be fitted on a chosen period only (``fit_start``/``fit_end``)
   so that, later, held-out test data does not influence the thresholds.
-* ``hampel``: |x − local median| > max(k·1.4826·local MAD, min_deviation) within a *centred*
-  time window. Centring uses values on both sides; that is acceptable for reviewing history and
-  the detector is never part of a model's feature pipeline.
+* ``hampel`` (Hampel identifier, Pearson 2002): for each value, the centred time window
+  [t − W/2, t + W/2] gives a local median m and MAD = median(|xⱼ − m|) over the window; flag
+  when |x − m| > max(k·1.4826·MAD, min_deviation). At least three values are needed. Centring
+  uses values on both sides; that is acceptable for reviewing history and the detector is
+  never part of a model's feature pipeline.
 * ``rate_of_change``: |Δx / Δt| between consecutive valid samples above a limit (units per
   minute). Steps across a gap longer than 2× the typical interval are not compared. Both edges
   of a spike are flagged; review decides.
-* ``flatline``: a value that stays within ``tolerance`` of the previous one for at least the
-  given duration (stuck transmitter). A gap ends the plateau.
+* ``flatline``: values that stay within a band of width ``tolerance`` (max − min of the run)
+  for at least the given duration (stuck transmitter). A gap ends the plateau. A slow drift
+  made of small steps is *not* a plateau.
 * ``limits``: outside physical/engineering limits (detector values, else the variable's limits).
 * ``invalid_text``: cells that held status text such as "Bad" in the source file.
 """
@@ -135,18 +138,15 @@ def detect(
             score = np.nan_to_num(z)
 
     elif k is DetectorKind.HAMPEL:
-        window = f"{int(det.window_s)}s"
-        local_median = series.rolling(window, center=True, min_periods=3).median()
-        deviation = (series - local_median).abs()
-        local_mad = deviation.rolling(window, center=True, min_periods=3).median()
-        threshold = np.maximum(det.threshold * MAD_SCALE * local_mad.to_numpy(), det.min_deviation)
-        dev = deviation.to_numpy()
-        with np.errstate(invalid="ignore"):
-            flags = valid & (dev > threshold) & (dev > 0)
-            score = np.where(
-                local_mad.to_numpy() > 0, dev / (MAD_SCALE * local_mad.to_numpy()), np.inf
-            )
-        score = np.nan_to_num(score, posinf=0.0)
+        pos = np.flatnonzero(valid)
+        med, mad = _window_median_mad(ns(series.index)[pos], x[pos], float(det.window_s))
+        dev = np.abs(x[pos] - med)
+        threshold = np.maximum(det.threshold * MAD_SCALE * mad, det.min_deviation)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            hit = (dev > threshold) & (dev > 0)  # NaN (too few neighbours) compares False
+            z = np.where(mad > 0, dev / (MAD_SCALE * mad), 0.0)
+        flags[pos] = hit
+        score[pos] = np.nan_to_num(z)
 
     elif k is DetectorKind.RATE_OF_CHANGE:
         vals = series.dropna()
@@ -167,10 +167,7 @@ def detect(
             t = ns(vals.index)
             v = vals.to_numpy()
             step = median_interval_ns(vals.index)
-            same = (np.abs(np.diff(v)) <= det.tolerance) & (
-                (np.diff(t) <= 2 * step) if step else True
-            )
-            plateau = np.concatenate([[0], np.cumsum(~same)])  # id changes when the value moves
+            plateau = _plateaus(t, v, det.tolerance, 2 * step if step else 0)
             first = np.full(plateau[-1] + 1, np.iinfo(np.int64).max)
             last = np.zeros(plateau[-1] + 1, dtype=np.int64)
             np.minimum.at(first, plateau, t)
@@ -203,6 +200,66 @@ def detect(
 
     events = _events(det, name, series.index, flags, score)
     return DetectorResult(det, name, series.index, flags, events, note)
+
+
+_CHUNK_CELLS = 4_000_000  # bounds the temporary window matrix (~32 MB)
+
+
+def _window_median_mad(
+    t: np.ndarray, v: np.ndarray, window_s: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Median and MAD of every centred window ``[tᵢ − W/2, tᵢ + W/2]`` (valid points only).
+
+    The MAD is taken about *that window's* median (Hampel's definition), not about each
+    neighbour's own local median. Windows with fewer than three values give NaN. Windows with
+    the same number of values are evaluated together as one matrix (regular sampling gives
+    only a few distinct counts).
+    """
+    n = v.size
+    med = np.full(n, np.nan)
+    mad = np.full(n, np.nan)
+    if n == 0:
+        return med, mad
+    half = int(round(window_s * 1e9 / 2))
+    lo = np.searchsorted(t, t - half, side="left")
+    count = np.searchsorted(t, t + half, side="right") - lo
+    for c in np.unique(count):
+        if c < 3:
+            continue
+        rows = np.flatnonzero(count == c)
+        step = max(1, _CHUNK_CELLS // int(c))
+        for s in range(0, rows.size, step):
+            r = rows[s : s + step]
+            block = v[lo[r, None] + np.arange(c)]
+            m = np.median(block, axis=1)
+            med[r] = m
+            mad[r] = np.median(np.abs(block - m[:, None]), axis=1)
+    return med, mad
+
+
+def _plateaus(t: np.ndarray, v: np.ndarray, tolerance: float, max_gap_ns: int) -> np.ndarray:
+    """Plateau id per value: a plateau is a run whose values all lie within a band of width
+    ``tolerance`` (max − min ≤ tolerance). A time gap longer than ``max_gap_ns`` ends it.
+
+    Comparing with the whole run (not only the previous value) keeps a slow, steady drift made
+    of small steps from counting as a stuck value.
+    """
+    n = v.size
+    gap = np.diff(t) > max_gap_ns if max_gap_ns else np.zeros(max(n - 1, 0), dtype=bool)
+    if tolerance <= 0:  # exact repeats: a vectorised special case of the same rule
+        moved = (np.diff(v) != 0) | gap
+        return np.concatenate([[0], np.cumsum(moved)])
+    ids = np.zeros(n, dtype=np.int64)
+    pid, lo, hi = 0, v[0], v[0]
+    for i in range(1, n):
+        lo_i, hi_i = min(lo, v[i]), max(hi, v[i])
+        if gap[i - 1] or hi_i - lo_i > tolerance:
+            pid += 1
+            lo = hi = v[i]
+        else:
+            lo, hi = lo_i, hi_i
+        ids[i] = pid
+    return ids
 
 
 def _events(

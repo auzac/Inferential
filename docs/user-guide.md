@@ -236,6 +236,14 @@ date until you train again.
   times, residuals against time, prediction and any predictor, residual histogram and
   autocorrelation, and **Applicability** — the training range of every predictor and how many
   later samples fall outside it.
+- **What-if** shows the chosen model's prediction over time with one slider per input, largest
+  effect first. *Shift* adds an offset to an input (up to ± its training range); *Hold* keeps it
+  at one value inside its training range, which removes that input's own variation from the
+  line. The original prediction stays on the chart; each input shows its change of Y (Δŷ), and
+  a warning appears when inputs leave the training range (extrapolation). The models are linear,
+  so a shift moves the whole line by coefficient × offset. Inputs are the model's features
+  (windowed, filtered values); moving one while the others keep their values is a sensitivity,
+  not a forecast — in the plant, correlated inputs usually move together.
 - Prefer a model that is accurate *and* simple, stable and physically sensible. Good fit
   statistics alone do not make a model ready for online use.
 

@@ -6,8 +6,25 @@ production release is `v1.0.0`.
 ## Unreleased
 
 ### Changed
+- Tables fill the window. When the view is wider than the table, the columns grow in proportion
+  to their content instead of leaving an empty band beside the last column; when it is narrower,
+  the table keeps its own widths and scrolls rather than squeezing the text. Column widths you
+  drag become the proportions from then on. This covers every table — the stage pages, Cleaning &
+  Exclusions, Data Import and the import wizard.
+- Every header sits over its own values: left over text, right over numbers. Qt centres them by
+  default, which drifts away from the column's values as the column widens.
+- Cells in the Cleaning tables carry their full text as a tooltip, since a long note now elides
+  at the column width cap instead of stretching its column.
 - Clicking a variable name toggles its checkbox in EDA, cleaning, predictor selection and
   cleaning dialogs. Checkbox clicks and keyboard selection remain available.
+
+### Fixed
+- **Hampel spike filter** now follows Hampel's definition: the MAD is taken about the window's
+  own median. It previously used each neighbour's own local median, which underestimated the
+  spread and roughly tripled false flags on noisy signals (same spikes caught).
+- **Flatline** detection with a tolerance now requires the values to stay inside a band of that
+  width. Before, small steps could chain, so a slow steady drift was reported as a stuck value.
+  (With the default tolerance 0 nothing changes.)
 
 ### Added
 - Optional input-subset model search for up to five selected predictors. Candidates use the same
@@ -16,6 +33,25 @@ production release is `v1.0.0`.
   review, and the final test is evaluated only for the selected candidate when revealed.
 - The selected candidate and subset-search setting are saved with the project. Model cards and
   prediction exports include only the candidate's inputs.
+- **What-if** tab on Validation: the chosen model's prediction over time with one slider per
+  input (largest effect first). *Shift* offsets an input by up to ± its training range; *Hold*
+  keeps it at a value inside the training range. The original prediction stays visible; each
+  input shows its change of Y (Δŷ) and a warning appears when inputs leave the training range.
+  Exact for every model type (all are linear in their features); the final test period joins
+  only once revealed. Calculation in `core/what_if.py`.
+- Reference checks: every statistical method is validated against an independent textbook
+  implementation (`tests/unit/test_reference_methods.py`, 31 checks) — MLR, PLS (incl. VIP), PCR,
+  Ridge, the one-standard-error rule, splits and CV folds (no shared process data), descriptive
+  statistics, correlations, VIF, window features, trailing filters and resampling.
+- A warning when cross-validation picks a value at the edge of the range tried (smallest or
+  largest Ridge alpha, or the maximum number of PLS/PCR components allowed).
+- Methodology: Hampel and flatline definitions, and a table of conventions that make numbers
+  differ from Minitab / JMP / SIMCA (S vs RMSE, quartile method, ridge α scale …).
+
+### Note for existing projects
+Hampel and flatline (tolerance > 0) events can change. Accepted or rejected decisions on events
+whose time span changed no longer match and the events return to *pending*; reopening such a
+project reports that saved results differ. Re-review the events and retrain.
 
 ## v0.5.7 — Lag sensitivity correctness (2026-10-13)
 
