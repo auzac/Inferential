@@ -59,7 +59,7 @@ from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.theme import mark_primary, theme_colour, tinted
 from inferential_studio.ui.widgets.cursor_readout import CursorReadout
-from inferential_studio.ui.widgets.data_table import DataTableView
+from inferential_studio.ui.widgets.data_table import ColumnFiller, DataTableView
 from inferential_studio.ui.widgets.flow_layout import flow_row
 from inferential_studio.ui.widgets.overlays import IntervalShade, mask_spans
 from inferential_studio.ui.widgets.plots import ORANGE, VERMILION
@@ -84,6 +84,7 @@ def _item(
     text: str, data=None, *, checkable: bool = False, checked: bool = False
 ) -> QTableWidgetItem:  # noqa: ANN001
     item = QTableWidgetItem(text)
+    item.setToolTip(text)  # long text elides at the column cap; the tooltip keeps it readable
     item.setFlags(
         Qt.ItemFlag.ItemIsSelectable
         | Qt.ItemFlag.ItemIsEnabled
@@ -96,17 +97,22 @@ def _item(
     return item
 
 
-def _table(headers: list[str]) -> QTableWidget:
+def _table(headers: list[str]) -> tuple[QTableWidget, ColumnFiller]:
     t = QTableWidget(0, len(headers))
     t.setHorizontalHeaderLabels(headers)
     t.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     t.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     t.verticalHeader().setVisible(False)
-    t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-    t.horizontalHeader().setStretchLastSection(True)
+    t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+    t.horizontalHeader().setResizeContentsPrecision(200)  # measure the first rows only
+    # Headers over their values, left-aligned like every cell in these tables (Qt centres them).
+    t.horizontalHeader().setDefaultAlignment(
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    )
     t.setAlternatingRowColors(True)
     t.setMinimumHeight(64)  # header + two rows; the tab scrolls rather than the page growing
-    return t
+    # The returned filler keeps the columns filling the tab: call refit() after every repopulate.
+    return t, ColumnFiller(t)
 
 
 class CleaningPage(StagePage):
@@ -215,7 +221,7 @@ class CleaningPage(StagePage):
     # ------------------------------------------------------------------ tab construction
 
     def _build_manual_tab(self) -> QWidget:
-        self.manual_table = _table(
+        self.manual_table, self._manual_filler = _table(
             ["On", "Start", "End", "Duration", "Reason", "Applies to", "Note", "Author"]
         )
         self.manual_table.itemChanged.connect(self._manual_toggled)
@@ -242,7 +248,7 @@ class CleaningPage(StagePage):
         return w
 
     def _build_rules_tab(self) -> QWidget:
-        self.rules_table = _table(
+        self.rules_table, self._rules_filler = _table(
             ["On", "Name", "Condition", "Applies to", "Action", "Reason", "Rows matched"]
         )
         self.rules_table.itemChanged.connect(self._rule_toggled)
@@ -264,7 +270,7 @@ class CleaningPage(StagePage):
         return w
 
     def _build_detection_tab(self) -> QWidget:
-        self.detector_table = _table(
+        self.detector_table, self._detector_filler = _table(
             ["On", "Method", "Variables", "Settings", "Auto-exclude", "Events", "Pending"]
         )
         self.detector_table.itemChanged.connect(self._detector_toggled)
@@ -288,7 +294,7 @@ class CleaningPage(StagePage):
             self.event_filter.addItem(label, status)
         self.event_filter.setCurrentIndex(1)  # pending first: what needs attention
         self.event_filter.currentIndexChanged.connect(lambda _i: self._fill_events())
-        self.events_table = _table(
+        self.events_table, self._events_filler = _table(
             ["Variable", "Method", "Start", "End", "Points", "Size", "Status"]
         )
         self.events_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -660,6 +666,7 @@ class CleaningPage(StagePage):
             for c, cell in enumerate(cells):
                 t.setItem(r, c, cell)
         t.blockSignals(False)
+        self._manual_filler.refit()
 
     def _manual_toggled(self, item: QTableWidgetItem) -> None:
         if item.column() != 0:
@@ -750,6 +757,7 @@ class CleaningPage(StagePage):
             for c, cell in enumerate(cells):
                 t.setItem(r, c, cell)
         t.blockSignals(False)
+        self._rules_filler.refit()
 
     def apply_theme(self) -> None:
         """Re-apply the error colour cached in the rules table cells (see ui/theme.py)."""
@@ -861,6 +869,7 @@ class CleaningPage(StagePage):
             for c, cell in enumerate(cells):
                 t.setItem(r, c, cell)
         t.blockSignals(False)
+        self._detector_filler.refit()
         for r in range(t.rowCount()):
             if t.item(r, 0).data(Qt.ItemDataRole.UserRole) in selected:
                 t.selectRow(r)
@@ -996,6 +1005,7 @@ class CleaningPage(StagePage):
                 cells[-1].setForeground(QColor(PENDING_COLOUR))
             for c, cell in enumerate(cells):
                 t.setItem(r, c, cell)
+        self._events_filler.refit()
         state = self._session.cleaning
         total = len(state.events) if state else 0
         if (

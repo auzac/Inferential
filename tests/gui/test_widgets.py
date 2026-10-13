@@ -384,6 +384,41 @@ def test_summary_table_fits_its_rows(qtbot):
     assert table.height() == header + 6 * 22 + 2 * table.frameWidth()  # then it scrolls
 
 
+def test_table_columns_fill_a_wide_view(qtbot):
+    from PySide6.QtCore import Qt
+
+    from inferential_studio.ui.widgets.data_table import DataTableView
+
+    table = DataTableView()
+    qtbot.addWidget(table)
+    table.show()
+    frame = pd.DataFrame(
+        {"Variable": ["Column Pressure (barg)", "Tray 20 Temperature"], "r": [-0.3552, 0.0389]}
+    )
+    table.resize(100, 300)  # far narrower than the content
+    table.set_frame(frame)
+    qtbot.wait(10)
+    content = [table.columnWidth(c) for c in range(2)]
+    assert sum(content) > table.viewport().width()
+    assert table.horizontalScrollBar().maximum() > 0  # it scrolls rather than eliding to fit
+    table.resize(1200, 300)
+    qtbot.wait(10)
+    wide = [table.columnWidth(c) for c in range(2)]
+    assert sum(wide) == table.viewport().width()  # no empty band beside the last column
+    assert all(w > c for w, c in zip(wide, content, strict=True))  # every column grew
+    assert wide[0] > wide[1]  # "Variable" holds more text, so it stays the wider column
+    share = wide[0] / sum(wide)
+    table.setColumnWidth(0, 60)  # as if the user dragged the divider to narrow "Variable"
+    table.resize(900, 300)  # the next resize spreads the widths the user chose
+    qtbot.wait(10)
+    assert sum(table.columnWidth(c) for c in range(2)) == table.viewport().width()
+    assert table.columnWidth(0) / table.viewport().width() < share  # the drag became the ratio
+    # Each header sits over its own values: text left, numbers right.
+    horizontal, role = Qt.Orientation.Horizontal, Qt.ItemDataRole.TextAlignmentRole
+    assert table.model_.headerData(0, horizontal, role) & int(Qt.AlignmentFlag.AlignLeft)
+    assert table.model_.headerData(1, horizontal, role) & int(Qt.AlignmentFlag.AlignRight)
+
+
 def test_flow_row_reserves_its_wrapped_height(qtbot):
     from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
 
