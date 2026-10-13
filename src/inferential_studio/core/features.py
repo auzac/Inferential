@@ -538,6 +538,8 @@ def lag_scan(
     *,
     excluded: np.ndarray | None = None,
     cutoff: pd.Timestamp | None = None,
+    regime: np.ndarray | None = None,
+    reject_regime_overlap: bool = True,
     min_pairs: int = 10,
     cancel: CancelToken | None = None,
 ) -> LagScan:
@@ -555,6 +557,12 @@ def lag_scan(
     if any(not trial.is_causal for trial in trials):
         raise AlignmentError("Lag selection requires causal windows. Use lookback placement or delays that keep every window in the past.")
     signal = process_signal(raw, spec, excluded)
+    regime_ns = None
+    if reject_regime_overlap and regime is not None:
+        regime_mask = np.asarray(regime, dtype=bool)
+        if regime_mask.shape != (len(raw),):
+            raise AlignmentError("Regime exclusions must match the predictor rows.")
+        regime_ns = ns(raw.index)[regime_mask]
     times = pd.DatetimeIndex(target.times)
     y = np.asarray(target.values, dtype=float)
     use = ~np.isnan(y) & ~np.asarray(target.excluded, dtype=bool)
@@ -565,7 +573,7 @@ def lag_scan(
     counts = np.zeros(delays.size, dtype=int)
     for i, trial in enumerate(trials):
         check(cancel)
-        res = aggregate_windows(signal, sample_ns, trial)
+        res = aggregate_windows(signal, sample_ns, trial, regime_ns)
         ok = ~np.isnan(res.value)
         counts[i] = int(ok.sum())
         if counts[i] >= min_pairs and np.ptp(res.value[ok]) > 0 and np.ptp(y[ok]) > 0:

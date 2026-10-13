@@ -145,9 +145,10 @@ def describe_window(spec: FeatureSpec) -> str:
     return f"({rel(start)}, {rel(end)}]"
 
 
-def _lag_task(target, raw, spec, delays, excluded, cutoff, **kw):  # noqa: ANN001, ANN201
+def _lag_task(target, raw, spec, delays, excluded, cutoff, regime, reject_regime_overlap, **kw):  # noqa: ANN001, ANN201
     return lag_scan(
-        target, raw, spec, delays, excluded=excluded, cutoff=cutoff, cancel=kw.get("cancel")
+        target, raw, spec, delays, excluded=excluded, cutoff=cutoff,
+        regime=regime, reject_regime_overlap=reject_regime_overlap, cancel=kw.get("cancel")
     )
 
 
@@ -704,6 +705,8 @@ class ProcessingPage(StagePage):
             delays,
             excluded,
             cutoff,
+            state.regime.copy() if state is not None else None,
+            self._session.project.alignment.reject_regime_overlap,
             on_result=self._lag_done,
             on_error=lambda msg, _d: (
                 self._session.messages.error(f"Lag scan failed: {msg}", "processing"),

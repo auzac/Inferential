@@ -342,3 +342,19 @@ def test_lag_scan_ignores_predictor_data_after_training_cutoff():
     future.loc[future.index > at(150)] = 1e6
     changed = lag_scan(tgt, future, spec, np.array([300., 600.]), cutoff=at(150))
     np.testing.assert_array_equal(baseline.pearson, changed.pearson)
+
+
+def test_lag_scan_honours_regime_rejection_and_opt_out():
+    x = minutes(np.arange(100.))
+    tgt = target([at(m) for m in range(10, 91, 5)])
+    spec = FeatureSpec("x", window_s=300, min_coverage=0.5)
+    regime = np.zeros(len(x), bool)
+    regime[9] = True
+    fm = build_feature_matrix(tgt, x.to_frame(), [spec],
+        excluded=pd.DataFrame({"x": regime}, index=x.index), regime=regime)
+    scan = lag_scan(tgt, x, spec, np.array([0.]), excluded=regime,
+        regime=regime, cutoff=at(90))
+    assert scan.n_pairs[0] == fm.eligible.sum() == 16
+    allowed = lag_scan(tgt, x, spec, np.array([0.]), excluded=regime,
+        regime=regime, reject_regime_overlap=False, cutoff=at(90))
+    assert allowed.n_pairs[0] == 17
