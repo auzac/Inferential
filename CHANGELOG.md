@@ -3,6 +3,32 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## Unreleased — Statistical methods audit
+
+Every statistical method was checked against an independent textbook implementation
+(`tests/unit/test_reference_methods.py`, 31 checks). MLR, PLS (incl. VIP), PCR, Ridge, the
+one-standard-error rule, splits and CV folds (no shared process data), descriptive statistics,
+correlations, VIF, window features, trailing filters and resampling all match their definitions.
+
+### Fixed
+- **Hampel spike filter** now follows Hampel's definition: the MAD is taken about the window's
+  own median. It previously used each neighbour's own local median, which underestimated the
+  spread and roughly tripled false flags on noisy signals (same spikes caught).
+- **Flatline** detection with a tolerance now requires the values to stay inside a band of that
+  width. Before, small steps could chain, so a slow steady drift was reported as a stuck value.
+  (With the default tolerance 0 nothing changes.)
+
+### Added
+- A warning when cross-validation picks a value at the edge of the range tried (smallest or
+  largest Ridge alpha, or the maximum number of PLS/PCR components allowed).
+- Methodology: Hampel and flatline definitions, and a table of conventions that make numbers
+  differ from Minitab / JMP / SIMCA (S vs RMSE, quartile method, ridge α scale …).
+
+### Note for existing projects
+Hampel and flatline (tolerance > 0) events can change. Accepted or rejected decisions on events
+whose time span changed no longer match and the events return to *pending*; reopening such a
+project reports that saved results differ. Re-review the events and retrain.
+
 ## v0.5.7 — Lag sensitivity correctness (2026-10-13)
 
 ### Changed
