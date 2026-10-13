@@ -673,6 +673,15 @@ class ProcessingPage(StagePage):
         name = self.current_variable()
         if name is None:
             return
+        if self._session._cleaning_running or self._session._features_running:
+            self._session.messages.warning("Wait for cleaning and feature alignment before scanning delays.", "processing")
+            return
+        cutoff = self.training_cutoff()
+        if cutoff is None:
+            self._session.messages.warning("Define a valid training period before scanning delays.", "processing")
+            self._lag = None
+            self.lag_use.setEnabled(False)
+            return
         frame, _mask, _target = self._session.frames()
         try:
             target = target_samples(
@@ -685,7 +694,6 @@ class ProcessingPage(StagePage):
         state = self._session.cleaning
         excluded = state.excluded[name].to_numpy() if state is not None else None
         delays = np.arange(0, self.lag_max.value() * 60 + 1e-9, self.lag_step.value() * 60)
-        cutoff = self.training_cutoff()
         self.lag_run.setEnabled(False)
         self._tasks.submit(
             f"Scanning delays for {name}",
@@ -729,11 +737,11 @@ class ProcessingPage(StagePage):
             text = f"Not enough samples to correlate ({cutoff})."
         self.lag_note.setText(f"{text} Dashed line: current setting.")
         self._session.messages.info(f"Lag scan for {scan.variable}: {text}", "processing")
-        self.lag_use.setEnabled(best is not None and best >= 0)
+        self.lag_use.setEnabled(best is not None and best >= 0 and scan.cutoff is not None)
 
     def _use_best_delay(self) -> None:
         scan = self._lag
-        if scan is None or scan.best_delay_s is None:
+        if scan is None or scan.best_delay_s is None or scan.cutoff is None:
             return
         specs = self.specs()
         new = [

@@ -546,6 +546,8 @@ def lag_scan(
     Only samples with valid, non-excluded Y at or before ``cutoff`` (the training period) are
     used, so the held-out test period never influences the choice of delay.
     """
+    if cutoff is None:
+        raise AlignmentError("Define a valid training period before scanning delays.")
     signal = process_signal(raw, spec, excluded)
     times = pd.DatetimeIndex(target.times)
     y = np.asarray(target.values, dtype=float)

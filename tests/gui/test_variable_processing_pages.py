@@ -107,3 +107,13 @@ def test_lag_scan_runs_on_training_period(loaded, qtbot):
     assert scan.cutoff is not None and scan.cutoff < loaded.session.features.sample_time.max()
     assert np.isfinite(scan.pearson).all()
     assert page.lag_use.isEnabled()
+
+
+def test_lag_scan_without_training_scope_does_not_submit(loaded, monkeypatch):
+    page = loaded.pages["processing"]
+    monkeypatch.setattr(page, "training_cutoff", lambda: None)
+    monkeypatch.setattr(page._tasks, "submit", lambda *a, **k: pytest.fail("unexpected scan"))
+    page.run_lag_scan()
+    assert page._lag is None
+    assert not page.lag_use.isEnabled()
+    assert "training period" in loaded.session.messages.events[0].text

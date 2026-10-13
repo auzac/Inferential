@@ -265,7 +265,7 @@ def test_lag_scan_recovers_pure_deadtime():
     y = 2.0 * x[sample_min - 20] + rng.normal(0, 0.05, sample_min.size)  # 20-minute deadtime
     tgt = target([at(int(m)) for m in sample_min], values=y)
     spec = FeatureSpec("x", window_s=60, aggregation=Aggregation.LAST)
-    scan = lag_scan(tgt, xs, spec, np.arange(0, 3601, 60))
+    scan = lag_scan(tgt, xs, spec, np.arange(0, 3601, 60), cutoff=tgt.times.max())
     assert scan.best_delay_s == 1200
     # The scan respects the training cutoff: later samples are ignored.
     cut = lag_scan(tgt, xs, spec, np.array([1200.0]), cutoff=at(2000))
@@ -312,3 +312,9 @@ def test_vectorised_windows_match_direct_computation(agg):
         window = x[(x.index > lo) & (x.index <= hi)].to_numpy()
         expected = fn(window) if window.size else np.nan
         assert res.value[k] == pytest.approx(expected, rel=1e-12, nan_ok=True)
+
+
+def test_lag_scan_requires_training_cutoff():
+    x = minutes(range(30))
+    with pytest.raises(AlignmentError, match="training period"):
+        lag_scan(target([at(10)]), x, FeatureSpec("x"), np.array([0.0]))
