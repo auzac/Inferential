@@ -79,6 +79,12 @@ later value. It is labelled preliminary in the UI because it ignores deadtime an
 - **Detectors** (z-score, robust MAD z-score, IQR, Hampel, rate of change, flatline,
   engineering limits, status text) produce *events* (contiguous flagged samples of one
   variable). Definitions are in `core/quality.py`. Defaults are deliberately conservative.
+  **Hampel identifier** (Pearson 2002): for each value, the centred time window
+  `[t − W/2, t + W/2]` gives the local median `m` and `MAD = median |xⱼ − m|` over that window;
+  the value is flagged when `|x − m| > max(k · 1.4826 · MAD, minimum deviation)` (at least three
+  values in the window). **Flatline**: values that stay inside a band of width *tolerance*
+  (max − min of the run) for at least the given duration; a gap longer than 2× the typical
+  interval ends the run, and a slow drift made of small steps is not a flatline.
   Statistics for z/MAD/IQR can be fitted on a chosen period so that, once a test period exists,
   it does not influence thresholds.
 - **Review**: an event is *pending* until the user accepts it (excluded for that variable only)
@@ -213,9 +219,11 @@ Scaling: standardise (mean/SD), robust (median/IQR) or none — always fitted on
 only. Tuning minimises the mean CV RMSE; with the *one-standard-error* option (default) the
 simplest setting (fewest components, largest alpha) whose mean CV RMSE is within one standard
 error of the best is chosen. Component counts are capped at the number of predictors and at the
-smallest CV training fold − 1. The validation period ranks the models; the final test period is
-evaluated with the same fitted pipelines, but the application hides its metrics until the user
-explicitly reveals them. All models of one run share the same split.
+smallest CV training fold − 1. When the best value lies at the edge of the range tried (smallest
+or largest alpha, or the maximum number of components allowed) the model carries a warning,
+because the optimum may lie outside the range. The validation period ranks the models; the final
+test period is evaluated with the same fitted pipelines, but the application hides its metrics
+until the user explicitly reveals them. All models of one run share the same split.
 
 Invalid situations are reported, not hidden: fewer than 10 training samples, constant target or
 predictor in the training period, MLR with too few samples for its predictors (or linearly
@@ -248,6 +256,24 @@ deviation of Y. Residual plots use `actual − predicted`. Residual autocorrelat
 consecutive lab samples with ±1.96/√n reference lines. Applicability: training minimum,
 maximum, mean and SD of every feature, and how many validation/test samples fall outside the
 training range.
+
+## Comparing results with other statistics packages
+
+The estimators are the standard ones and are checked against independent textbook
+implementations in `tests/unit/test_reference_methods.py` (OLS, NIPALS PLS1 and VIP, PCA + OLS,
+closed-form ridge, the one-standard-error rule, Hampel, window features, trailing filters).
+Numbers can still differ from Minitab, JMP or SIMCA because of conventions:
+
+| Quantity | Here | Typical elsewhere |
+|---|---|---|
+| Training error | `RMSE = √(SSE/n)` | Minitab *S*, JMP *Root Mean Square Error*: `√(SSE/(n−p−1))` (slightly larger) |
+| Quartiles, IQR | linear interpolation (`(n−1)p`, Excel/R type 7) | Minitab, JMP: `(n+1)p` |
+| Ridge penalty | `‖y − Xb‖² + α‖b‖²` on the scaled predictors (scikit-learn; not divided by n) | other tools scale λ differently: compare fits, not α values |
+| PLS / PCR components | sign of a component is arbitrary | may be flipped; predictions, coefficients and VIP are unaffected |
+| Scaling | population SD (`n`) | often `n − 1`; predictions of MLR, PLS and PCR are unaffected |
+| R² of validation / test | uses that period's own mean | some tools' "predicted R²/Q²" use the training mean |
+| Collinear MLR | minimum-norm solution with a warning | redundant terms are dropped |
+| Coefficient SE, p-values | not shown (autocorrelated samples) | shown |
 
 ## Model files and batch prediction (`core/artifacts.py`)
 
