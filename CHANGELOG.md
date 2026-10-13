@@ -9,6 +9,14 @@ production release is `v1.0.0`.
 - Clicking a variable name toggles its checkbox in EDA, cleaning, predictor selection and
   cleaning dialogs. Checkbox clicks and keyboard selection remain available.
 
+### Added
+- Optional input-subset model search for up to five selected predictors. Candidates use the same
+  eligible rows, chronological split and training-period CV folds; the leaderboard ranks by CV
+  RMSE and shows the best candidate at each input count. Validation results remain visible for
+  review, and the final test is evaluated only for the selected candidate when revealed.
+- The selected candidate and subset-search setting are saved with the project. Model cards and
+  prediction exports include only the candidate's inputs.
+
 ## v0.5.7 — Lag sensitivity correctness (2026-10-13)
 
 ### Changed

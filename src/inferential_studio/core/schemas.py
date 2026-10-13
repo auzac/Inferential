@@ -28,9 +28,10 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SCHEMA_VERSION = 5  # 1 = M0; 2 = native timestamps, duplicate policy, sample ids;
+SCHEMA_VERSION = 6  # 1 = M0; 2 = native timestamps, duplicate policy, sample ids;
 # 3 = rules, detectors, flag reviews; 4 = alignment options, splits and model configurations;
-# 5 = optional embedded data (portable projects), saved training results, report details
+# 5 = optional embedded data (portable projects), saved training results, report details;
+# 6 = optional predictor-subset model search
 
 
 class SchemaError(ValueError):
@@ -778,6 +779,7 @@ class ModellingConfig:
     models: tuple[ModelSpec, ...] = field(default_factory=default_model_specs)
     # Tuning picks the simplest setting whose CV error is within one standard error of the best.
     one_standard_error: bool = True
+    search_subsets: bool = False
 
     def __post_init__(self) -> None:
         _coerce_enum(self, "scaling", Scaling)

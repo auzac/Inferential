@@ -102,6 +102,7 @@ class ExportPage(StagePage):
         # -- the trained model -----------------------------------------------------------
         self.model_combo = QComboBox()
         self.model_combo.currentIndexChanged.connect(self._update_equation)
+        self.model_combo.currentIndexChanged.connect(self._sync_test_checkbox)
         self.include_test = QCheckBox("Include final-test results")
         self.title = QLineEdit()
         self.version = QLineEdit()
@@ -257,12 +258,7 @@ class ExportPage(StagePage):
         ):
             b.setEnabled(ok)
         self.btn_features.setEnabled(s.features is not None)
-        self.include_test.setEnabled(ok and s.test_revealed)
-        self.include_test.setChecked(ok and s.test_revealed)
-        self.include_test.setToolTip(
-            "" if s.test_revealed else "Reveal the final test on the Validation page first."
-        )
-        previous = self.model_combo.currentText()
+        previous = (run.selected_model_name if run is not None else None) or self.model_combo.currentText()
         self.model_combo.blockSignals(True)
         self.model_combo.clear()
         if run is not None:
@@ -273,8 +269,26 @@ class ExportPage(StagePage):
         i = self.model_combo.findText(previous)
         self.model_combo.setCurrentIndex(max(i, 0))
         self.model_combo.blockSignals(False)
+        self._sync_test_checkbox()
         self._update_equation()
         self._update_apply_state()
+
+    @Slot()
+    def _sync_test_checkbox(self, *_args: object) -> None:
+        s = self._session
+        run = s.training
+        selected = next(
+            (m for m in run.models if m.name == self.model_combo.currentText()), None
+        ) if run is not None else None
+        has_test = bool(selected is not None and selected.metric("test", "n") > 0)
+        allow_test = bool(s.test_revealed and run is not None and
+                          (not run.search_subsets or has_test))
+        enabled = self._run_ok() and allow_test
+        self.include_test.setEnabled(enabled)
+        self.include_test.setChecked(enabled)
+        self.include_test.setToolTip(
+            "" if allow_test else "Reveal the final test for this candidate on the Validation page first."
+        )
 
     @Slot()
     def _load_info(self) -> None:
