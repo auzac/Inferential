@@ -225,6 +225,15 @@ because the optimum may lie outside the range. The validation period ranks the m
 test period is evaluated with the same fitted pipelines, but the application hides its metrics
 until the user explicitly reveals them. All models of one run share the same split.
 
+Optional **input-subset search** evaluates every non-empty subset of the selected predictor pool
+(up to five predictors, 31 subsets) for each enabled model family. Every candidate uses the same
+feature-matrix rows, chronological split and training-period CV folds; candidates only differ in
+which already-preprocessed columns they use. This prevents a smaller subset from gaining an easier
+sample population. Hyperparameters are tuned inside the same training-only folds. The leaderboard
+ranks by mean training-period CV RMSE and gives one best candidate per input count; validation
+metrics are shown for review but do not drive subset search. The final test is not predicted or
+scored for candidates during search. On reveal, only the selected fitted candidate is evaluated.
+
 Invalid situations are reported, not hidden: fewer than 10 training samples, constant target or
 predictor in the training period, MLR with too few samples for its predictors (or linearly
 dependent predictors — the minimum-norm solution is shown with a warning), more components than

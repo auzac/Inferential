@@ -27,6 +27,12 @@ production release is `v1.0.0`.
   (With the default tolerance 0 nothing changes.)
 
 ### Added
+- Optional input-subset model search for up to five selected predictors. Candidates use the same
+  eligible rows, chronological split and training-period CV folds; the leaderboard ranks by CV
+  RMSE and shows the best candidate at each input count. Validation results remain visible for
+  review, and the final test is evaluated only for the selected candidate when revealed.
+- The selected candidate and subset-search setting are saved with the project. Model cards and
+  prediction exports include only the candidate's inputs.
 - **What-if** tab on Validation: the chosen model's prediction over time with one slider per
   input (largest effect first). *Shift* offsets an input by up to ± its training range; *Hold*
   keeps it at a value inside the training range. The original prediction stays visible; each

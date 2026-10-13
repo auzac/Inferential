@@ -161,6 +161,29 @@ def test_exports(trained, tmp_path):
         write_table(shown, tmp_path / "p.txt")
 
 
+def test_subset_candidate_artifact_and_predictions_use_only_its_inputs(trained):
+    from dataclasses import replace
+
+    from inferential_studio.core.models import evaluate_final_test
+    from inferential_studio.core.schemas import ModelSpec
+
+    _ds, project, fm, _baseline = trained
+    cfg = replace(project.modelling, models=(ModelSpec(ModelKind.MLR),), search_subsets=True)
+    run = train_models(fm, cfg)
+    chosen = next(m for m in run.models if m.name == run.selected_model_name)
+    artifact = build_artifact(project, run, chosen.name)
+    assert [p["name"] for p in artifact.data["predictors"]] == chosen.features
+    exported = predictions_table(run, chosen.name, fm)
+    assert {column.removeprefix("f[").removesuffix("]") for column in exported
+            if column.startswith("f[")} == set(chosen.features)
+
+    with pytest.raises(ArtifactError, match="only for the selected candidate"):
+        other = next(m for m in run.models if m.ok and m.name != chosen.name)
+        build_artifact(project, run, other.name, include_test=True)
+    evaluate_final_test(run, chosen.name)
+    assert TEST in build_artifact(project, run, chosen.name, include_test=True).data["metrics"]
+
+
 def test_results_summary_and_comparison(trained):
     import json as _json
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 import platform
 import warnings
 from dataclasses import dataclass, field
+from itertools import combinations
 
 import numpy as np
 import pandas as pd
@@ -350,6 +351,7 @@ class ModelResult:
     metrics: pd.DataFrame | None = None  # index = split
     details: PlsDetails | PcrDetails | None = None
     warnings: list[str] = field(default_factory=list)
+    features: list[str] = field(default_factory=list)  # candidate-specific predictors
 
     @property
     def ok(self) -> bool:
@@ -386,6 +388,9 @@ class TrainingRun:
     feature_notes: list[str] = field(default_factory=list)
     feature_specs: dict[str, FeatureSpec] = field(default_factory=dict)  # as used for training
     alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
+    search_subsets: bool = False
+    selected_model_name: str | None = None
+    target_values: np.ndarray | None = field(default=None, repr=False)
 
     @property
     def errors(self) -> list[str]:
@@ -395,18 +400,25 @@ class TrainingRun:
         return VALIDATION if self.split.mask(VALIDATION).any() else "cv"
 
     def comparison(self, include_test: bool = False) -> pd.DataFrame:
-        """One row per trained model, ranked by validation RMSE (or CV RMSE without validation)."""
+        """One row per model; subset searches rank candidates by training-period CV RMSE."""
         rows = []
         for m in self.models:
-            row = {"model": m.name, "status": "ok" if m.ok else m.error, "cv_rmse": m.cv_rmse}
+            row = {
+                "model": m.name,
+                "status": "ok" if m.ok else m.error,
+                "input_count": len(m.features or self.features),
+                "predictors": ", ".join(m.features or self.features),
+                "cv_rmse": m.cv_rmse,
+            }
             splits = (TRAIN, VALIDATION, TEST) if include_test else (TRAIN, VALIDATION)
             for s in splits:
                 for k in ("r2", "rmse", "mae", "bias"):
                     row[f"{s}_{k}"] = m.metric(s, k) if m.ok else np.nan
             rows.append(row)
         table = pd.DataFrame(rows).set_index("model")
-        key = "validation_rmse" if self.ranking_split() == VALIDATION else "cv_rmse"
-        return table.sort_values(key, na_position="last")
+        key = "cv_rmse" if self.search_subsets or self.ranking_split() != VALIDATION else "validation_rmse"
+        tie_breakers = [key, "input_count", "model"] if self.search_subsets else key
+        return table.sort_values(tie_breakers, na_position="last")
 
 
 def _versions() -> dict[str, str]:
@@ -477,6 +489,9 @@ def train_models(
     X_tr, y_tr = X_all[tr], fm.y[tr]
     X_tr_df = pd.DataFrame(X_tr, columns=names)
     problems = check_feasibility(X_tr_df, y_tr, split)
+    # In search mode a constant input invalidates only subsets containing that input.
+    if config.search_subsets:
+        problems = [p for p in problems if not p.message.startswith("Constant in the training period")]
     if fm.non_causal:
         problems.append(
             Problem(WARNING, "Non-causal features (read future data): " + ", ".join(fm.non_causal))
@@ -503,8 +518,14 @@ def train_models(
         feature_notes=list(fm.notes),
         feature_specs=dict(fm.specs),
         alignment=fm.alignment,
+        search_subsets=config.search_subsets,
+        target_values=np.asarray(fm.y, dtype=float).copy(),
     )
     if run.errors:
+        return run
+
+    if config.search_subsets and len(names) > 5:
+        run.problems.append(Problem(ERROR, "Subset search supports up to 5 selected inputs (31 subsets). Reduce the input pool or turn subset search off."))
         return run
 
     folds = None
@@ -517,23 +538,89 @@ def train_models(
         fold_error = str(exc)
         problems.append(Problem(WARNING, f"Cross-validation unavailable: {exc}"))
 
+    if config.search_subsets and folds is None:
+        run.problems.append(Problem(ERROR, f"Input-subset comparison needs valid time-aware CV folds: {fold_error}"))
+        return run
+
     specs = [m for m in config.models if m.enabled]
     sd_y = float(np.std(y_tr, ddof=1)) if y_tr.size > 1 else np.nan
-    for i, spec in enumerate(specs):
+    candidates = [
+        (spec, list(subset))
+        for size in range(1, len(names) + 1)
+        for subset in combinations(names, size)
+        for spec in specs
+    ] if config.search_subsets else [(spec, names) for spec in specs]
+    for i, (spec, candidate_names) in enumerate(candidates):
         check(cancel)
-        report(progress, i / max(len(specs), 1), f"Training {spec.label}")
-        run.models.append(
-            _train_one(spec, config, X_all, fm.y, labels, X_tr, y_tr, names, folds, fold_error,
-                       sd_y, fm.sample_time, cancel)
-        )  # fmt: skip
+        report(progress, i / max(len(candidates), 1), f"Training {spec.label} ({len(candidate_names)} inputs)")
+        indices = [names.index(name) for name in candidate_names]
+        X_candidate, X_train_candidate = X_all[:, indices], X_tr[:, indices]
+        candidate_df = X_tr_df[candidate_names]
+        candidate_issues = check_feasibility(candidate_df, y_tr, split)
+        fatal = next((p.message for p in candidate_issues if p.severity == ERROR), None)
+        if fatal:
+            result = ModelResult(spec, f"{spec.label} — {', '.join(candidate_names)}", error=fatal,
+                                 features=list(candidate_names))
+        else:
+            result = _train_one(
+                spec, config, X_candidate, fm.y, labels, X_train_candidate, y_tr,
+                candidate_names, folds, fold_error, sd_y, fm.sample_time, cancel,
+                defer_test=config.search_subsets,
+            )
+            result.features = list(candidate_names)
+            result.warnings.extend(
+                p.message for p in candidate_issues if p.severity != ERROR
+            )
+            if config.search_subsets:
+                result.name = f"{result.name} · {', '.join(candidate_names)}"
+        run.models.append(result)
+    successful = [m for m in run.models if m.ok]
+    if config.search_subsets and successful:
+        run.selected_model_name = min(
+            successful, key=lambda m: (m.cv_rmse, len(m.features), m.name)
+        ).name
     report(progress, 1.0, "Done")
     return run
+
+
+def evaluate_final_test(run: TrainingRun, model_name: str) -> None:
+    """Evaluate only the chosen fitted candidate on the held-out final test period."""
+    model = next((m for m in run.models if m.name == model_name and m.ok), None)
+    if model is None or model.pipeline is None:
+        raise ModelError("Choose a successfully trained model before revealing the final test.")
+    test = run.split.mask(TEST)
+    if not test.any():
+        return
+    if model.metrics is not None and model.metric(TEST, "n") > 0:
+        return  # Final test was already evaluated for this model.
+    features = model.features or run.features
+    X = run.feature_values.loc[:, features].to_numpy(dtype=float)
+    y_all = run.target_values
+    if y_all is None:
+        raise ModelError("Final-test target values are unavailable for this training run.")
+    pred = _predict(model.pipeline, X[test])
+    actual = np.asarray(y_all)[test]
+    train_actual = model.predictions.loc[model.predictions["split"] == TRAIN, "actual"].to_numpy()
+    sd_train = float(np.std(train_actual, ddof=1)) if train_actual.size > 1 else np.nan
+    metrics = regression_metrics(actual, pred, sd_train=sd_train)
+    model.metrics.loc[TEST] = metrics
+    rows = np.flatnonzero(test)
+    test_predictions = pd.DataFrame({
+        "row": rows,
+        "sample_time": run.sample_time[test],
+        "split": TEST,
+        "actual": actual,
+        "predicted": pred,
+        "residual": actual - pred,
+    })
+    model.predictions = pd.concat([model.predictions, test_predictions], ignore_index=True)
 
 
 def _train_one(
     spec: ModelSpec, config: ModellingConfig, X_all: np.ndarray, y_all: np.ndarray,
     labels: np.ndarray, X_tr: np.ndarray, y_tr: np.ndarray, names: list[str], folds,  # noqa: ANN001
     fold_error: str | None, sd_y: float, times: pd.DatetimeIndex, cancel: CancelToken | None,
+    *, defer_test: bool = False,
 ) -> ModelResult:  # fmt: skip
     name = spec.label
     result = ModelResult(spec, name)
@@ -626,7 +713,7 @@ def _train_one(
     with np.errstate(invalid="ignore", divide="ignore"):
         result.standardized = pd.Series(coef * sd_x / sd_y, index=names, name="standardized")
 
-    use = np.isin(labels, SPLITS)
+    use = np.isin(labels, (TRAIN, VALIDATION) if defer_test else SPLITS)
     pred = np.full(len(y_all), np.nan)
     pred[use] = _predict(pipe, X_all[use])
     result.predictions = pd.DataFrame(

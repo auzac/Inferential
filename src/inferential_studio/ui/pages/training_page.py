@@ -189,7 +189,8 @@ class TrainingPage(StagePage):
     def refresh(self) -> None:
         run = self._session.training
         self._update_button()
-        previous = self.model_combo.currentText()
+        previous = self._session.training.selected_model_name if run is not None else None
+        previous = previous or self.model_combo.currentText()
         self.model_combo.blockSignals(True)
         self.model_combo.clear()
         if run is not None:
@@ -222,6 +223,8 @@ class TrainingPage(StagePage):
                 "training.model", Level.WARNING, f"{m.spec.label} could not be trained: {m.error}"
             )
             return
+        if self._session.training.search_subsets:
+            self._session.select_model(m.name)
         self._update_coefficients(m)
         self._update_cv(m)
         latent = isinstance(m.details, (PlsDetails, PcrDetails))

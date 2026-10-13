@@ -44,6 +44,8 @@ def predictions_table(
     m = next((x for x in run.models if x.name == model_name and x.ok), None)
     if m is None:
         raise ExportError(f"'{model_name}' has no predictions to export.")
+    if run.search_subsets and include_test and m.metric(TEST, "n") <= 0:
+        raise ExportError("The final test was evaluated only for the selected candidate.")
     pred = m.predictions
     if not include_test:
         pred = pred[pred["split"] != TEST]
@@ -60,7 +62,7 @@ def predictions_table(
     out[f"actual {run.target}"] = pred["actual"].to_numpy()
     out[f"predicted {run.target}"] = pred["predicted"].to_numpy()
     out["residual (actual - predicted)"] = pred["residual"].to_numpy()
-    for name in run.features:
+    for name in (m.features or run.features):
         out[f"f[{name}]"] = run.feature_values[name].to_numpy()[rows]
     return out
 
