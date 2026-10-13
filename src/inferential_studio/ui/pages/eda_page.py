@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QSplitter,
     QTabWidget,
@@ -51,6 +50,7 @@ from inferential_studio.ui.widgets.plots import (
 )
 from inferential_studio.ui.widgets.time_axis import TzDateAxisItem, to_epoch_seconds
 from inferential_studio.ui.widgets.trend_view import TrendSeries, TrendView
+from inferential_studio.ui.widgets.variable_list import CheckableVariableList
 
 SCATTER_RGB = (47, 143, 216)  # BLUE as RGB, for translucent points and bars
 COVERAGE_FULL = (63, 143, 107)  # muted green for 100 % valid (chart background = none)
@@ -124,7 +124,7 @@ class EdaPage(StagePage):
         self.search = QLineEdit()
         self.search.setPlaceholderText("Filter variables…")
         self.search.textChanged.connect(self._filter_list)
-        self.var_list = QListWidget()
+        self.var_list = CheckableVariableList()
         self.var_list.itemChanged.connect(self._on_selection_changed)
         self.show_target = QCheckBox("Show target (lab samples)")
         self.show_target.setChecked(True)

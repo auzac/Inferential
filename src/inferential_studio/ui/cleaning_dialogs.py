@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
@@ -49,6 +48,7 @@ from inferential_studio.core.schemas import (
     SchemaError,
 )
 from inferential_studio.ui.theme import tinted
+from inferential_studio.ui.widgets.variable_list import CheckableVariableList
 
 REASON_LABELS = {
     ExclusionReason.SHUTDOWN: "Shutdown",
@@ -156,7 +156,7 @@ class ScopeSelector(QGroupBox):
         group = QButtonGroup(self)
         group.addButton(self.all_radio)
         group.addButton(self.some_radio)
-        self.list = QListWidget()
+        self.list = CheckableVariableList()
         self.list.setMaximumHeight(120)
         for name in variables:
             item = QListWidgetItem(name)
@@ -615,7 +615,7 @@ class DetectorDialog(QDialog):
         self.help.setWordWrap(True)
         self.help.setObjectName("placeholderNote")
 
-        self.variables = QListWidget()
+        self.variables = CheckableVariableList()
         self.variables.setMaximumHeight(150)
         chosen = set(d.variables) if d else set()
         for name in variables:

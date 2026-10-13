@@ -15,6 +15,8 @@ production release is `v1.0.0`.
   default, which drifts away from the column's values as the column widens.
 - Cells in the Cleaning tables carry their full text as a tooltip, since a long note now elides
   at the column width cap instead of stretching its column.
+- Clicking a variable name toggles its checkbox in EDA, cleaning, predictor selection and
+  cleaning dialogs. Checkbox clicks and keyboard selection remain available.
 
 ## v0.5.7 — Lag sensitivity correctness (2026-10-13)
 

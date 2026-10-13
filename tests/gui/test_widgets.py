@@ -467,3 +467,37 @@ def test_value_axis_never_draws_overlapping_labels(qtbot):
     assert overlapping(label_rects(lambda p: pg.AxisItem.generateDrawSpecs(axis, p)))
     rects = label_rects(axis.generateDrawSpecs)
     assert rects and not overlapping(rects)  # still labelled, nothing on top of each other
+
+
+def test_variable_name_and_checkbox_each_toggle_once(qtbot):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QStyle, QStyleOptionViewItem
+
+    from inferential_studio.ui.widgets.variable_list import VariableList
+
+    widget = VariableList()
+    qtbot.addWidget(widget)
+    widget.set_variables(["Tray temperature"], {}, set())
+    widget.show()
+    item = widget.list.item(0)
+    rect = widget.list.visualItemRect(item)
+    # Click the name, then click the same name again to deselect.
+    pos = QPoint(rect.left() + 70, rect.center().y())
+    with qtbot.waitSignal(widget.selection_changed):
+        qtbot.mouseClick(widget.list.viewport(), Qt.MouseButton.LeftButton, pos=pos)
+    assert widget.checked() == ["Tray temperature"]
+    qtbot.mouseClick(widget.list.viewport(), Qt.MouseButton.LeftButton, pos=pos)
+    assert widget.checked() == []
+    option = QStyleOptionViewItem()
+    option.initFrom(widget.list)
+    option.rect = rect
+    option.features |= QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+    checkbox = widget.list.style().subElementRect(
+        QStyle.SubElement.SE_ItemViewItemCheckIndicator, option, widget.list
+    )
+    events = []
+    widget.selection_changed.connect(lambda: events.append(True))
+    qtbot.mouseClick(widget.list.viewport(), Qt.MouseButton.LeftButton, pos=checkbox.center())
+    assert widget.checked() == ["Tray temperature"] and len(events) == 1
+    qtbot.keyClick(widget.list, Qt.Key.Key_Space)
+    assert widget.checked() == []
