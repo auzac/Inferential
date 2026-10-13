@@ -3,6 +3,16 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## Unreleased — What-if
+
+### Added
+- **What-if** tab on Validation: the chosen model's prediction over time with one slider per
+  input (largest effect first). *Shift* offsets an input by up to ± its training range; *Hold*
+  keeps it at a value inside the training range. The original prediction stays visible; each
+  input shows its change of Y (Δŷ) and a warning appears when inputs leave the training range.
+  Exact for every model type (all are linear in their features); the final test period joins
+  only once revealed. Calculation in `core/what_if.py`.
+
 ## v0.5.7 — Lag sensitivity correctness (2026-10-13)
 
 ### Changed
