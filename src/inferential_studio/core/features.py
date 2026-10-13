@@ -553,10 +553,23 @@ def lag_scan(
     delays = np.asarray(delays_s, dtype=float)
     if delays.ndim != 1 or not delays.size or not np.isfinite(delays).all():
         raise AlignmentError("Supply a non-empty list of finite delays.")
-    trials = [replace(spec, deadtime_s=max(float(d), 0.0), shift_s=min(float(d), 0.0)) for d in delays]
+    trials = [
+        replace(spec, deadtime_s=max(float(d), 0.0), shift_s=min(float(d), 0.0)) for d in delays
+    ]
     if any(not trial.is_causal for trial in trials):
-        raise AlignmentError("Lag selection requires causal windows. Use lookback placement or delays that keep every window in the past.")
-    signal = process_signal(raw, spec, excluded)
+        raise AlignmentError(
+            "Lag selection requires causal windows. Use lookback placement or delays that keep every window in the past."
+        )
+    # Bound preprocessing too: future missingness must not change the sampling interval
+    # used for training-window coverage.
+    raw_scope = np.asarray(raw.index <= cutoff)
+    if excluded is not None:
+        excluded = np.asarray(excluded, dtype=bool)
+        if excluded.shape != (len(raw),):
+            raise AlignmentError("Predictor exclusions must match the predictor rows.")
+        excluded = excluded[raw_scope]
+    scoped_raw = raw.iloc[np.flatnonzero(raw_scope)]
+    signal = process_signal(scoped_raw, spec, excluded)
     regime_ns = None
     if reject_regime_overlap and regime is not None:
         regime_mask = np.asarray(regime, dtype=bool)

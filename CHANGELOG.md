@@ -3,6 +3,14 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## Unreleased — lag sensitivity correctness
+
+- M1: require a valid training cutoff; wait for cleaning and alignment instead of falling back to all samples.
+- M2: reject future-reading lag candidates and restrict predictor preprocessing to training history.
+- M3: honour the project regime-overlap policy during lag scans.
+- M4: invalidate scans on input changes and discard stale background results before display or application.
+- Regression tests cover missing scopes, causality, future missingness, regime rejection, and stale results.
+
 ## v0.5.5 — New window shell and themes (2026-10-12)
 
 ### Changed

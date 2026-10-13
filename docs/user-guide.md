@@ -191,9 +191,13 @@ window before the sample time. Y is never filled in between samples.
 - **Preview** — the cleaned signal (grey), the processed signal (blue) and, for the chosen lab
   sample (◀ ▶), its window (orange band) and the resulting feature value. The lab samples are
   shown below (grey = not usable). The status line explains the sample's result.
-- **Lag sensitivity** — correlation with Y for a range of delays, using only the training
-  period of the current split. *Use best delay as deadtime* copies the peak, but prefer a delay
-  that is physically plausible.
+- **Lag sensitivity** — scans causal candidate delays within the current training time
+  boundary. Define a valid split and wait for cleaning/alignment to finish first. Centred
+  windows require enough delay to keep every candidate in the past; a scan starting at zero
+  therefore needs Lookback placement. The scan honours the regime-exclusion setting.
+  *Use best delay as deadtime* copies the peak, but prefer a physically plausible delay.
+  Changes to scan inputs clear results. Pair counts can vary by delay; this is a single
+  predictor diagnostic, not a multivariable identification test.
 - **Coverage report** — per predictor, how many samples fail each check. **Feature matrix** —
   every lab sample with its feature values, eligibility and the reason when it is not usable.
 

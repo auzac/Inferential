@@ -147,8 +147,15 @@ def describe_window(spec: FeatureSpec) -> str:
 
 def _lag_task(target, raw, spec, delays, excluded, cutoff, regime, reject_regime_overlap, **kw):  # noqa: ANN001, ANN201
     return lag_scan(
-        target, raw, spec, delays, excluded=excluded, cutoff=cutoff,
-        regime=regime, reject_regime_overlap=reject_regime_overlap, cancel=kw.get("cancel")
+        target,
+        raw,
+        spec,
+        delays,
+        excluded=excluded,
+        cutoff=cutoff,
+        regime=regime,
+        reject_regime_overlap=reject_regime_overlap,
+        cancel=kw.get("cancel"),
     )
 
 
@@ -168,6 +175,9 @@ class ProcessingPage(StagePage):
         self._sample = 0  # selected lab sample (row of the feature matrix)
         self._preview_stale = True
         self._lag: LagScan | None = None
+        self._lag_generation = 0
+        self._lag_request = 0
+        self._lag_context: tuple | None = None
 
         # -- settings table -------------------------------------------------------
         self.table = QTableWidget(0, len(COLUMNS))
@@ -342,6 +352,16 @@ class ProcessingPage(StagePage):
         self._preview_timer.setInterval(120)
         self._preview_timer.timeout.connect(self._update_preview)
 
+        for signal in (
+            session.changed,
+            session.data_changed,
+            session.cleaning_changed,
+            session.features_changed,
+            session.modelling_changed,
+        ):
+            signal.connect(self._invalidate_lag)
+        self.lag_max.valueChanged.connect(self._invalidate_lag)
+        self.lag_step.valueChanged.connect(self._invalidate_lag)
         session.changed.connect(self._refresh)
         session.inputs_changed.connect(self._refresh)
         session.features_changed.connect(self._on_features)
@@ -449,9 +469,7 @@ class ProcessingPage(StagePage):
     @Slot()
     def _selection_changed(self) -> None:
         self._load_form()
-        self._lag = None
-        self.lag_plot.clear()
-        self.lag_use.setEnabled(False)
+        self._invalidate_lag()
         self._preview_timer.start()
 
     def _load_form(self) -> None:
@@ -570,7 +588,7 @@ class ProcessingPage(StagePage):
             return
         spec = next(s for s in self.specs() if s.variable == name)
         state = self._session.cleaning
-        excluded = state.excluded[name].to_numpy() if state is not None else None
+        excluded = state.excluded[name].to_numpy(copy=True) if state is not None else None
         raw = frame[name]
         with contextlib.suppress(SchemaError):
             spec = self.form_spec(name) if self.selected_variables() == [name] else spec
@@ -653,6 +671,46 @@ class ProcessingPage(StagePage):
 
     # ------------------------------------------------------------------ lag sensitivity
 
+    def _invalidate_lag(self, *_args) -> None:
+        self._lag_generation += 1
+        self._lag = None
+        self._lag_context = None
+        self.lag_plot.clear()
+        self.lag_note.setText("")
+        self.lag_use.setEnabled(False)
+
+    def _scan_context(self) -> tuple:
+        session = self._session
+        return (
+            self._lag_generation,
+            id(session.project),
+            session.data_version,
+            session._cleaning_serial,
+            session._features_serial,
+            self.current_variable(),
+            tuple(self.specs()),
+            session.project.alignment,
+            session.project.modelling,
+            self.lag_max.value(),
+            self.lag_step.value(),
+        )
+
+    def _finish_lag(self, scan: LagScan, request: int, context: tuple) -> None:
+        if request != self._lag_request:
+            return
+        self.lag_run.setEnabled(True)
+        if context != self._scan_context():
+            return
+        self._lag_context = context
+        self._lag_done(scan)
+
+    def _lag_failed(self, message: str | None, request: int, context: tuple) -> None:
+        if request != self._lag_request:
+            return
+        self.lag_run.setEnabled(True)
+        if message and context == self._scan_context():
+            self._session.messages.error(f"Lag scan failed: {message}", "processing")
+
     def training_cutoff(self) -> pd.Timestamp | None:
         """Last training sample time under the current split settings (no test data used)."""
         fm: FeatureMatrix | None = self._session.features
@@ -675,11 +733,15 @@ class ProcessingPage(StagePage):
         if name is None:
             return
         if self._session._cleaning_running or self._session._features_running:
-            self._session.messages.warning("Wait for cleaning and feature alignment before scanning delays.", "processing")
+            self._session.messages.warning(
+                "Wait for cleaning and feature alignment before scanning delays.", "processing"
+            )
             return
         cutoff = self.training_cutoff()
         if cutoff is None:
-            self._session.messages.warning("Define a valid training period before scanning delays.", "processing")
+            self._session.messages.warning(
+                "Define a valid training period before scanning delays.", "processing"
+            )
             self._lag = None
             self.lag_use.setEnabled(False)
             return
@@ -693,26 +755,27 @@ class ProcessingPage(StagePage):
             return
         spec = next(s for s in self.specs() if s.variable == name)
         state = self._session.cleaning
-        excluded = state.excluded[name].to_numpy() if state is not None else None
+        excluded = state.excluded[name].to_numpy(copy=True) if state is not None else None
         delays = np.arange(0, self.lag_max.value() * 60 + 1e-9, self.lag_step.value() * 60)
+        self._invalidate_lag()
+        self._lag_request += 1
+        request = self._lag_request
+        context = self._scan_context()
         self.lag_run.setEnabled(False)
         self._tasks.submit(
             f"Scanning delays for {name}",
             _lag_task,
             target,
-            frame[name],
+            frame[name].copy(),
             spec,
             delays,
             excluded,
             cutoff,
             state.regime.copy() if state is not None else None,
             self._session.project.alignment.reject_regime_overlap,
-            on_result=self._lag_done,
-            on_error=lambda msg, _d: (
-                self._session.messages.error(f"Lag scan failed: {msg}", "processing"),
-                self.lag_run.setEnabled(True),
-            ),
-            on_cancelled=lambda: self.lag_run.setEnabled(True),
+            on_result=lambda scan: self._finish_lag(scan, request, context),
+            on_error=lambda msg, _d: self._lag_failed(msg, request, context),
+            on_cancelled=lambda: self._lag_failed(None, request, context),
         )
 
     def _lag_done(self, scan: LagScan) -> None:
@@ -744,6 +807,9 @@ class ProcessingPage(StagePage):
 
     def _use_best_delay(self) -> None:
         scan = self._lag
+        if self._lag_context != self._scan_context():
+            self._invalidate_lag()
+            return
         if scan is None or scan.best_delay_s is None or scan.cutoff is None:
             return
         specs = self.specs()
