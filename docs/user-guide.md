@@ -236,14 +236,16 @@ date until you train again.
   times, residuals against time, prediction and any predictor, residual histogram and
   autocorrelation, and **Applicability** — the training range of every predictor and how many
   later samples fall outside it.
-- **What-if** shows the chosen model's prediction over time with one slider per input, largest
-  effect first. *Shift* adds an offset to an input (up to ± its training range); *Hold* keeps it
-  at one value inside its training range, which removes that input's own variation from the
-  line. The original prediction stays on the chart; each input shows its change of Y (Δŷ), and
-  a warning appears when inputs leave the training range (extrapolation). The models are linear,
-  so a shift moves the whole line by coefficient × offset. Inputs are the model's features
-  (windowed, filtered values); moving one while the others keep their values is a sensitivity,
-  not a forecast — in the plant, correlated inputs usually move together.
+- **What-if** is a step test on the chosen model, like bumping an input on a simulator at
+  steady state. Every input starts at its training mean; at *Step at* the inputs you set with
+  their sliders (up to ± their training range, largest effect first) change and stay there.
+  The inputs pass through the model's own features, so the prediction responds as the soft
+  sensor would online: flat during the deadtime, then a ramp over the averaging window (an EWMA
+  filter adds a lag), settling at coefficient × step. The panel gives the final change of Y,
+  when the prediction first moves and when it reaches 95 % of the change, and warns when a step
+  leaves the training range. The response shape comes from the feature design (deadtime,
+  window, filter), not from the real process dynamics; in the plant, correlated inputs usually
+  move together. On short screens only the prediction chart is shown.
 - Prefer a model that is accurate *and* simple, stable and physically sensible. Good fit
   statistics alone do not make a model ready for online use.
 

@@ -257,11 +257,16 @@ consecutive lab samples with ±1.96/√n reference lines. Applicability: trainin
 maximum, mean and SD of every feature, and how many validation/test samples fall outside the
 training range.
 
-**What-if** (`core/what_if.py`): every model is affine in its features, so the effect of an
-input change is exact without refitting. Shifting input j by δ changes every prediction by
-`bⱼ·δ`; holding it at v changes the prediction at time t by `bⱼ·(v − fⱼ(t))`. The samples are the
-training and validation periods (and the final test once revealed); a changed input outside its
-training min–max is reported as extrapolation.
+**What-if step test** (`core/what_if.py`): synthetic inputs on a regular grid (1 min, finer for
+windows under 10 min) sit at their training means, preceded by a steady-state lead-in long
+enough for every window and filter (20 half-lives for an EWMA, whose weights are normalised over
+the available history). At the step time the chosen inputs change by their steps. Features are
+built with the model's stored definitions by the same code as training and batch prediction,
+and `ŷ = b₀ + Σ bⱼ fⱼ` is evaluated at every grid time. The final change is exactly `Σ bⱼ·Δⱼ`;
+the first response is the first time the prediction moves (the deadtime for lookback windows,
+before the step for centred ones) and *settled* is when it stays at or beyond 95 % of the final
+change. Tested against the discrete deadtime + moving-average response and the first-order
+EWMA response `1 − 0.5^(Δt/h)`.
 
 ## Comparing results with other statistics packages
 

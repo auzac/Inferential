@@ -60,7 +60,7 @@ Listed in workflow order.
 | `exclusions.py` | Combines manual intervals, rules and reviewed flags into one exclusion mask per variable. |
 | `features.py` | **Time alignment**: per-predictor resample → trailing filter → window aggregation at each lab sample; coverage/gap checks; eligibility; lag scan. |
 | `diagnostics.py` | Raw-vs-cleaned stats, aligned correlations, VIF. |
-| `what_if.py` | What-if: the selected model's prediction with inputs shifted or held (exact, affine). |
+| `what_if.py` | What-if step test: steady-state inputs stepped at a time, run through the model's own features. |
 | `splits.py` | Chronological train/validation/test split, purge gap, time-aware CV folds. |
 | `models.py` | MLR/PLS/PCR/Ridge pipelines, CV tuning, coefficients, PLS/PCR details, VIP, metrics, feasibility checks. |
 | `artifacts.py` | `.imsmodel` JSON model files, batch prediction with applicability checks, saved-results summary/compare. |
@@ -117,7 +117,7 @@ frameless window), `message_panel.py` (fixed message log at the bottom),
 `chart_menu.py` (the one right-click menu every chart uses: Copy / Save image; create charts with
 `plots.plot_widget` or `chart_menu.add_plot` so they get it),
 `trend_view.py` (synchronized trend charts: drag-to-zoom, Back, Fit all), `what_if.py`
-(Validation's What-if tab: input sliders over the prediction trend), `cursor_readout.py`
+(Validation's What-if tab: step test with input sliders, inputs and prediction trends), `cursor_readout.py`
 (values at cursor), `overlays.py` (exclusion shading), `time_axis.py` (timezone-aware axis),
 `plots.py` (`plot_widget` / `ChartPlotItem`: empty-state message and series key in the chart
 header; series colours; `ValueAxis` without overlapping labels), `heatmap.py`, `data_table.py` (pandas table view; number formatting in `format_value`,
