@@ -6,12 +6,20 @@ import math
 
 import numpy as np
 import pandas as pd
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QEvent,
+    QModelIndex,
+    QObject,
+    QSortFilterProxyModel,
+    Qt,
+)
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHeaderView, QTableView, QWidget
 
 NUMERIC_ZERO = 1e-14  # smaller magnitudes are floating-point residue (e.g. an OLS bias)
 GROUP_FROM = 10_000  # thousands separators from five digits up (years and ids stay plain)
+COLUMN_MAX = 260  # px: no column is measured wider than this (long text elides instead)
 
 
 def format_value(value: object) -> str:
@@ -54,6 +62,7 @@ class DataFrameModel(QAbstractTableModel):
         super().__init__(parent)
         self._frame = pd.DataFrame()
         self._columns: list[np.ndarray] = []  # column values as arrays: fast cell access
+        self._numeric_cols: list[bool] = []
         self._headers = headers or {}
         self._row_colours: dict[int, QColor] = {}
         if frame is not None:
@@ -63,6 +72,10 @@ class DataFrameModel(QAbstractTableModel):
         self.beginResetModel()
         self._frame = frame
         self._columns = [frame.iloc[:, j].to_numpy() for j in range(frame.shape[1])]
+        self._numeric_cols = [
+            bool(pd.api.types.is_numeric_dtype(dtype) and not pd.api.types.is_bool_dtype(dtype))
+            for dtype in frame.dtypes
+        ]
         if headers is not None:
             self._headers = headers
         self._row_colours = {}
@@ -104,12 +117,103 @@ class DataFrameModel(QAbstractTableModel):
     def headerData(
         self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole
     ):  # noqa: N802
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            # Track the cells: as the columns widen, a header that sits at the other end of its
+            # column from its values looks detached. Qt's default here is centred.
+            if orientation == Qt.Orientation.Horizontal and section < len(self._numeric_cols):
+                side = (
+                    Qt.AlignmentFlag.AlignRight
+                    if self._numeric_cols[section]
+                    else Qt.AlignmentFlag.AlignLeft
+                )
+                return int(side | Qt.AlignmentFlag.AlignVCenter)
+            return None
         if role != Qt.ItemDataRole.DisplayRole:
             return None
         if orientation == Qt.Orientation.Horizontal:
             name = str(self._frame.columns[section])
             return self._headers.get(name, name)
         return format_value(self._frame.index[section])
+
+
+class ColumnFiller(QObject):
+    """Grow a table's columns, in proportion, until they fill the view.
+
+    No Qt resize mode does this. ``ResizeToContents`` and ``Interactive`` leave the spare width
+    of a wide window as an empty band to the right of the last column; ``Stretch`` gives every
+    column the same width, which reads as wrong as soon as one column holds a variable name and
+    the next holds a flag. Growing all of them in proportion keeps the table's rhythm at any
+    window size, and no single column balloons.
+
+    A table narrower than its content keeps its content widths and scrolls, rather than eliding
+    text to fit. Widths the user drags become the proportions used from then on.
+    """
+
+    def __init__(self, table: QTableView) -> None:
+        super().__init__(table)
+        self._table = table
+        self._weights: list[float] = []
+        self._applying = False
+        table.horizontalHeader().sectionResized.connect(self._section_resized)
+        # The viewport's own resize is the signal to use: during the view's resizeEvent the
+        # viewport may not have been laid out yet, and the width read would be the old one.
+        table.viewport().installEventFilter(self)
+
+    def refit(self) -> None:
+        """Re-measure the columns from their content (capped), then fill the view.
+
+        Call after the table's content changes.
+        """
+        self._table.resizeColumnsToContents()
+        for col in range(self._table.model().columnCount()):
+            self._table.setColumnWidth(col, min(self._table.columnWidth(col), COLUMN_MAX))
+        self.measure()
+
+    def measure(self) -> None:
+        """Adopt the current column widths (just measured from content) as the proportions."""
+        self.set_weights(
+            [self._table.columnWidth(c) for c in range(self._table.model().columnCount())]
+        )
+
+    def set_weights(self, weights: list[float]) -> None:
+        self._weights = [max(1.0, float(w)) for w in weights]
+        self.apply()
+
+    def apply(self) -> None:
+        count = self._table.model().columnCount()
+        view = self._table.viewport().width()
+        total = sum(self._weights)
+        if not self._weights or len(self._weights) != count or view <= 0 or total <= 0:
+            return
+        if view <= total:  # narrower than the content: keep the widths and let it scroll
+            widths = [int(w) for w in self._weights]
+        else:
+            widths = [max(1, round(w * view / total)) for w in self._weights]
+            widths[widths.index(max(widths))] += view - sum(widths)  # rounding: fill exactly
+        if all(self._table.columnWidth(c) == widths[c] for c in range(count)):
+            return
+        self._applying = True
+        try:
+            for col, width in enumerate(widths):
+                self._table.setColumnWidth(col, width)
+        finally:
+            self._applying = False
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt override
+        if event.type() == QEvent.Type.Resize:
+            self.apply()
+        return False
+
+    def _section_resized(self, *_args) -> None:
+        if self._applying:
+            return  # our own distribution, not the user dragging a divider
+        # Remember the widths the user chose, but leave them alone: re-distributing under the
+        # mouse would drag the column back out from under the pointer. The next resize of the
+        # view scales these proportions to fill it.
+        self._weights = [
+            max(1.0, float(self._table.columnWidth(c)))
+            for c in range(self._table.model().columnCount())
+        ]
 
 
 class DataTableView(QTableView):
@@ -133,13 +237,12 @@ class DataTableView(QTableView):
         self.verticalHeader().setDefaultSectionSize(22)
         # Size columns from the first rows only: measuring every cell of a long table is slow.
         self.horizontalHeader().setResizeContentsPrecision(200)
+        self._filler = ColumnFiller(self)  # keeps the columns filling a wide window
         self._fit_rows: int | None = None
 
     def set_frame(self, frame: pd.DataFrame, headers: dict[str, str] | None = None) -> None:
         self.model_.set_frame(frame, headers)
-        self.resizeColumnsToContents()
-        for col in range(self.model_.columnCount()):
-            self.setColumnWidth(col, min(self.columnWidth(col), 260))
+        self._filler.refit()
         self._apply_fit()
 
     def fit_to_rows(self, max_rows: int = 8, min_rows: int = 2) -> None:

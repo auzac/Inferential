@@ -3,6 +3,19 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## Unreleased
+
+### Changed
+- Tables fill the window. When the view is wider than the table, the columns grow in proportion
+  to their content instead of leaving an empty band beside the last column; when it is narrower,
+  the table keeps its own widths and scrolls rather than squeezing the text. Column widths you
+  drag become the proportions from then on. This covers every table — the stage pages, Cleaning &
+  Exclusions, Data Import and the import wizard.
+- Every header sits over its own values: left over text, right over numbers. Qt centres them by
+  default, which drifts away from the column's values as the column widens.
+- Cells in the Cleaning tables carry their full text as a tooltip, since a long note now elides
+  at the column width cap instead of stretching its column.
+
 ## v0.5.7 — Lag sensitivity correctness (2026-10-13)
 
 ### Changed

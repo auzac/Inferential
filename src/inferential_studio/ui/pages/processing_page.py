@@ -58,7 +58,7 @@ from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
 from inferential_studio.ui.theme import mark_primary, theme_colour
-from inferential_studio.ui.widgets.data_table import DataTableView
+from inferential_studio.ui.widgets.data_table import ColumnFiller, DataTableView
 from inferential_studio.ui.widgets.flow_layout import flow_row
 from inferential_studio.ui.widgets.plots import (
     BLUE,
@@ -185,7 +185,12 @@ class ProcessingPage(StagePage):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        # Headers over their values, left-aligned like the cells (Qt centres them by default).
+        self.table.horizontalHeader().setDefaultAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._table_filler = ColumnFiller(self.table)  # widths are set in _refresh
         self.table.itemSelectionChanged.connect(self._selection_changed)
 
         # -- editor -----------------------------------------------------------------
@@ -441,6 +446,7 @@ class ProcessingPage(StagePage):
         if not self.selected_variables() and specs:
             self.table.selectRow(0)
         self._update_counts()
+        self._table_filler.refit()
         self._load_form()
         self._session.messages.set(
             "processing.inputs", Level.INFO,
