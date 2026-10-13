@@ -129,3 +129,37 @@ def test_training_reports_impossible_configuration(loaded, qtbot):
     )
     vpage = loaded.pages["validation"]
     assert vpage.model_combo.count() == 3  # only trained models have diagnostics
+
+
+def test_what_if_sliders_move_the_prediction(loaded, qtbot):
+    import numpy as np
+
+    from inferential_studio.core.splits import TRAIN, VALIDATION
+    from inferential_studio.core.what_if import HOLD
+
+    train(loaded, qtbot)
+    vpage = loaded.pages["validation"]
+    view = vpage.what_if
+    assert vpage.tabs.indexOf(view) >= 0
+    base = view._base
+    assert base is not None and set(base.splits) <= {TRAIN, VALIDATION}  # test hidden
+    original = view._what_if.getData()[1].copy()
+    np.testing.assert_allclose(original, base.predicted)
+    top = view._controls[0]  # largest effect over the training range first
+    top.slider.setValue(1000)  # shift by the full training range
+    shifted = view._what_if.getData()[1]
+    np.testing.assert_allclose(shifted - original, top.inp.coefficient * top.inp.span)
+    assert "Δŷ" in top.effect.text() and "outside the training range" in view.summary.text()
+    second = view._controls[1]
+    second.mode.setCurrentIndex(second.mode.findData(HOLD))  # starts at the training mean
+    assert second.change()[1] == pytest.approx(second.inp.mean, abs=second.inp.span / 1000)
+    view.reset()
+    np.testing.assert_allclose(view._what_if.getData()[1], original)
+    assert "Move a slider" in view.summary.text()
+    # Another model keeps the sliders' settings when the inputs are the same.
+    top.slider.setValue(750)
+    vpage.model_combo.setCurrentIndex(1)
+    same = next(c for c in view._controls if c.inp.name == top.inp.name)
+    assert same.slider.value() == 750
+    loaded.session.reveal_test()  # the test period joins once revealed
+    assert TEST in set(view._base.splits)

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from inferential_studio.core.models import METRIC_LABELS, ModelResult, autocorrelation
 from inferential_studio.core.splits import SPLITS, TEST, TRAIN, VALIDATION
 from inferential_studio.core.statistics import histogram
+from inferential_studio.core.what_if import what_if_base
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
@@ -35,6 +36,7 @@ from inferential_studio.ui.widgets.plots import (
     scatter,
 )
 from inferential_studio.ui.widgets.time_axis import to_epoch_seconds
+from inferential_studio.ui.widgets.what_if import WhatIfView
 
 COMPARISON_HEADERS = {
     "status": "Status",
@@ -126,6 +128,8 @@ class ValidationPage(StagePage):
         al.addWidget(self.applicability, 1)
         al.addWidget(self.app_note)
         self.tabs.addTab(abox, "Applicability")
+        self.what_if = WhatIfView(NO_RUN_TEXT)
+        self.tabs.addTab(self.what_if, "What-if")
         self.plot_note = note_label(
             "Training = fitted samples; Validation = used to compare models; Final test = untouched "
             "until revealed."
@@ -232,6 +236,7 @@ class ValidationPage(StagePage):
         if m is None:
             self.metrics.set_frame(pd.DataFrame())
             self.applicability.set_frame(pd.DataFrame())
+            self.what_if.set_base(None)
             return
         shown = self.splits_shown()
         metrics = m.metrics.loc[list(shown)].rename(index=SPLIT_NAMES)
@@ -242,6 +247,17 @@ class ValidationPage(StagePage):
         self._residuals(pred)
         self._update_residual_x()
         self._applicability()
+        self._what_if(m, shown)
+
+    def _what_if(self, m: ModelResult, shown: tuple[str, ...]) -> None:
+        project, run = self._session.project, self._session.training
+        units = {v.name: v.units for v in project.variables}
+        base = what_if_base(run, m, shown, units) if run is not None and m.ok else None
+        self.what_if.set_base(
+            base,
+            timezone=project.display_timezone,
+            target_units=units.get(run.target) if run else None,
+        )
 
     def _by_split(self, pred: pd.DataFrame):  # noqa: ANN202
         for split in SPLITS:

@@ -257,6 +257,12 @@ consecutive lab samples with ±1.96/√n reference lines. Applicability: trainin
 maximum, mean and SD of every feature, and how many validation/test samples fall outside the
 training range.
 
+**What-if** (`core/what_if.py`): every model is affine in its features, so the effect of an
+input change is exact without refitting. Shifting input j by δ changes every prediction by
+`bⱼ·δ`; holding it at v changes the prediction at time t by `bⱼ·(v − fⱼ(t))`. The samples are the
+training and validation periods (and the final test once revealed); a changed input outside its
+training min–max is reported as extrapolation.
+
 ## Comparing results with other statistics packages
 
 The estimators are the standard ones and are checked against independent textbook
