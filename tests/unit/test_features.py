@@ -318,3 +318,27 @@ def test_lag_scan_requires_training_cutoff():
     x = minutes(range(30))
     with pytest.raises(AlignmentError, match="training period"):
         lag_scan(target([at(10)]), x, FeatureSpec("x"), np.array([0.0]))
+
+
+def test_lag_scan_rejects_future_reading_candidates():
+    x = minutes(range(100))
+    tgt = target([at(m) for m in range(20, 90, 5)])
+    spec = FeatureSpec("x", window_s=600, placement=WindowPlacement.CENTERED)
+    with pytest.raises(AlignmentError, match="causal"):
+        lag_scan(tgt, x, spec, np.array([0.0, 600.0]), cutoff=at(80))
+    with pytest.raises(AlignmentError, match="causal"):
+        lag_scan(tgt, x, FeatureSpec("x"), np.array([-60.0]), cutoff=at(80))
+    # A centered window is causal when its entire window is before the target.
+    scan = lag_scan(tgt, x, spec, np.array([600.0]), cutoff=at(80))
+    assert scan.n_pairs[0] > 0
+
+
+def test_lag_scan_ignores_predictor_data_after_training_cutoff():
+    x = minutes(np.random.default_rng(30).normal(size=200))
+    tgt = target([at(m) for m in range(30, 151, 10)])
+    spec = FeatureSpec("x", window_s=600, placement=WindowPlacement.CENTERED)
+    baseline = lag_scan(tgt, x, spec, np.array([300., 600.]), cutoff=at(150))
+    future = x.copy()
+    future.loc[future.index > at(150)] = 1e6
+    changed = lag_scan(tgt, future, spec, np.array([300., 600.]), cutoff=at(150))
+    np.testing.assert_array_equal(baseline.pearson, changed.pearson)

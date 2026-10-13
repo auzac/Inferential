@@ -548,6 +548,12 @@ def lag_scan(
     """
     if cutoff is None:
         raise AlignmentError("Define a valid training period before scanning delays.")
+    delays = np.asarray(delays_s, dtype=float)
+    if delays.ndim != 1 or not delays.size or not np.isfinite(delays).all():
+        raise AlignmentError("Supply a non-empty list of finite delays.")
+    trials = [replace(spec, deadtime_s=max(float(d), 0.0), shift_s=min(float(d), 0.0)) for d in delays]
+    if any(not trial.is_causal for trial in trials):
+        raise AlignmentError("Lag selection requires causal windows. Use lookback placement or delays that keep every window in the past.")
     signal = process_signal(raw, spec, excluded)
     times = pd.DatetimeIndex(target.times)
     y = np.asarray(target.values, dtype=float)
@@ -555,12 +561,10 @@ def lag_scan(
     if cutoff is not None:
         use &= np.asarray(times <= cutoff)
     sample_ns, y = ns(times)[use], y[use]
-    delays = np.asarray(delays_s, dtype=float)
     r = np.full(delays.size, np.nan)
     counts = np.zeros(delays.size, dtype=int)
-    for i, d in enumerate(delays):
+    for i, trial in enumerate(trials):
         check(cancel)
-        trial = replace(spec, deadtime_s=max(float(d), 0.0), shift_s=min(float(d), 0.0))
         res = aggregate_windows(signal, sample_ns, trial)
         ok = ~np.isnan(res.value)
         counts[i] = int(ok.sum())
