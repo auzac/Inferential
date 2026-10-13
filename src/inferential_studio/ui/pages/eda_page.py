@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pyqtgraph as pg
 from PySide6.QtCore import QRectF, Qt, QTimer, Slot
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFontMetrics
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -57,6 +57,9 @@ COVERAGE_FULL = (63, 143, 107)  # muted green for 100 % valid (chart background 
 NO_ROWS = (140, 140, 140)  # bins without any timestamp
 SCATTER_DISPLAY_MAX = 20_000  # points drawn in scatter plots; statistics always use all data
 MATRIX_MAX = 6
+MATRIX_DISPLAY_MAX = 1_000  # points per matrix cell; a cell is ~90 x 50 px, so more is invisible
+MATRIX_TICK_PIXELS = 60  # axis length assumed when measuring y tick labels (see _even_y_axes)
+MATRIX_TICK_MARGIN = 2  # px of slack on top of the widest y tick label
 DEFAULT_SELECTED = 4
 
 SUMMARY_HEADERS = {
@@ -222,6 +225,12 @@ class EdaPage(StagePage):
         ml.addWidget(self.matrix, 1)
         ml.addWidget(self.matrix_note)
         self.tabs.addTab(self._matrix_tab, "Scatter matrix")
+        # The grid of plots is built once and then reused: rebuilding its 36 plots and the
+        # scatter items in them cost 1.3-1.7 s on every tick of the variable list.
+        self._matrix_side = 0  # side of the grid currently in self.matrix
+        self._matrix_key: tuple[int, tuple[str, ...]] | None = None  # (data version, variables)
+        self._matrix_cells: dict[tuple[int, int], pg.PlotItem] = {}
+        self._matrix_items: dict[tuple[int, int], pg.PlotDataItem] = {}
 
         self.hist_var = QComboBox()
         self.hist_var.currentIndexChanged.connect(self._update_histogram)
@@ -535,42 +544,103 @@ class EdaPage(StagePage):
         self.pair_note.setText(f"{method.title()} r = {r:.3f}; {shown}.")
 
     def _update_matrix(self) -> None:
-        self.matrix.clear()
-        names = [n for n in self.selected_variables() if n in self._frame.columns][:MATRIX_MAX]
+        names = tuple(n for n in self.selected_variables() if n in self._frame.columns)[:MATRIX_MAX]
         if len(names) < 2:
+            self._clear_matrix()
             self.matrix_note.setText("Check 2–6 variables in the list to draw a scatter matrix.")
             return
-        sub = self._frame[names]
-        idx = _subsample(len(sub), 5000)
+        # Drawing is the expensive part (a new scatter item per cell), so identical content is
+        # left alone: the same variables and the same data version are already on screen.
+        key = (self._session.data_version, names)
+        if key == self._matrix_key:
+            return
+        if len(names) != self._matrix_side:
+            self._build_matrix(len(names))
+        self._matrix_key = key
+        sub = self._frame[list(names)]
+        idx = _subsample(len(sub), MATRIX_DISPLAY_MAX)
         sub = sub.iloc[idx]
         for i, yname in enumerate(names):
             for j, xname in enumerate(names):
-                p = add_plot(self.matrix, row=i, col=j)
-                p.getAxis("left").setStyle(showValues=j == 0)
-                p.getAxis("bottom").setStyle(showValues=i == len(names) - 1)
+                cell = self._matrix_cells[(i, j)]
+                item = self._matrix_items[(i, j)]
                 if j == 0:
-                    p.setLabel("left", yname)
+                    cell.setLabel("left", yname)
                 if i == len(names) - 1:
-                    p.setLabel("bottom", xname)
+                    cell.setLabel("bottom", xname)
                 if i == j:
                     counts, edges = histogram(sub[xname], max_bins=30)
                     if counts.size:
-                        p.plot(
-                            edges,
-                            counts,
-                            stepMode="center",
-                            fillLevel=0,
-                            brush=(*SCATTER_RGB, 120),
-                            pen=None,
-                        )
+                        item.setData(edges, counts)
+                    else:  # a variable with nothing to bin: drop what the cell was showing
+                        item.setData([], [])
                 else:
                     xy = sub[[xname, yname]].dropna()
-                    p.plot(xy[xname].to_numpy(), xy[yname].to_numpy(), pen=None, symbol="o", symbolSize=2,
-                           symbolBrush=pg.mkBrush(*SCATTER_RGB, 80), symbolPen=None)  # fmt: skip
+                    item.setData(xy[xname].to_numpy(), xy[yname].to_numpy())
+                # Range now rather than at the next paint: the y gutter below reads it.
+                cell.vb.updateAutoRange()
+        self._even_y_axes()
         extra = (
             " (first 6 checked variables)" if len(self.selected_variables()) > MATRIX_MAX else ""
         )
         self.matrix_note.setText(f"{len(idx):,} evenly spaced rows drawn{extra}; display only.")
+
+    def _build_matrix(self, side: int) -> None:
+        """Build a side x side grid of empty plots, one per cell, with its data item."""
+        self._clear_matrix()
+        self._matrix_side = side
+        for i in range(side):
+            for j in range(side):
+                plot = add_plot(self.matrix, row=i, col=j)
+                plot.getAxis("left").setStyle(showValues=j == 0)
+                plot.getAxis("bottom").setStyle(showValues=i == side - 1)
+                if i == j:  # diagonal: histogram of the variable
+                    item = plot.plot(
+                        [], [], stepMode="center", fillLevel=0, brush=(*SCATTER_RGB, 120), pen=None
+                    )
+                else:
+                    item = plot.plot(
+                        [], [], pen=None, symbol="o", symbolSize=2,
+                        symbolBrush=pg.mkBrush(*SCATTER_RGB, 80), symbolPen=None,
+                    )  # fmt: skip
+                self._matrix_cells[(i, j)] = plot
+                self._matrix_items[(i, j)] = item
+
+    def _clear_matrix(self) -> None:
+        """Throw the grid away; the next draw rebuilds it."""
+        self.matrix.clear()
+        self._matrix_side = 0
+        self._matrix_key = None
+        self._matrix_cells.clear()
+        self._matrix_items.clear()
+
+    def _even_y_axes(self) -> None:
+        """Give the six rows of the left column one y-axis width, so their spines line up.
+
+        PyQtGraph sizes each left axis from the widest tick label *that axis* happens to
+        draw (``AxisItem._updateMaxTextSize``, only while painting, and only for a tick level
+        that survived its crowding test), so rows were 12 to 36 px apart and the plot areas
+        did not start at the same x. We ask its own tick engine for the labels every row will
+        draw and reserve the widest of them for the whole column.
+        """
+        font = QFontMetrics(self.matrix.font())
+        probe = pg.AxisItem("left")
+        widest = 0
+        for i in range(self._matrix_side):
+            cell = self._matrix_cells[(i, 0)]
+            low, high = cell.viewRange()[1]
+            levels = probe.tickValues(low, high, MATRIX_TICK_PIXELS)
+            if not levels:  # a flat variable has no ticks to label
+                continue
+            spacing, values = levels[0]  # the major level: the one that sizes the axis
+            for label in probe.tickStrings(values, 1.0, spacing):
+                widest = max(widest, font.boundingRect(label).width())
+        for i in range(self._matrix_side):
+            self._matrix_cells[(i, 0)].getAxis("left").setStyle(
+                autoExpandTextSpace=False,
+                autoReduceTextSpace=False,
+                tickTextWidth=widest + MATRIX_TICK_MARGIN,
+            )
 
     def _update_histogram(self) -> None:
         self.hist_plot.clear()

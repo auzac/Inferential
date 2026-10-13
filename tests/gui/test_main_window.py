@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QLabel, QMessageBox
 
 from inferential_studio.infrastructure.settings import AppSettings
 from inferential_studio.ui.main_window import MainWindow
-from inferential_studio.ui.pages.eda_page import EdaPage
+from inferential_studio.ui.pages.eda_page import MATRIX_DISPLAY_MAX, EdaPage
 from inferential_studio.ui.pages.export_page import ExportPage
 from inferential_studio.ui.pages.import_page import ImportPage
 from inferential_studio.ui.stages import STAGES
@@ -310,6 +310,55 @@ def test_eda_correlation_follows_checked_variables(qtbot, window, example_copy):
     apply()
     assert eda.heatmap._corr.empty
     assert "at least two" in eda.heatmap._placeholder.textItem.toPlainText()
+
+
+def test_eda_scatter_matrix_reuses_its_grid_and_aligns_the_axes(
+    qtbot, window, example_copy, monkeypatch
+):
+    open_and_wait(qtbot, window, example_copy / "sample_project.imsproj")
+    eda: EdaPage = window.pages["initial_eda"]
+    with qtbot.waitSignal(window.tasks.task_ended, timeout=30000):
+        window.sidebar.setCurrentRow(1)
+    qtbot.waitUntil(lambda: eda._result is not None, timeout=10000)
+
+    def apply() -> None:
+        eda._selection_timer.stop()
+        eda._apply_selection()
+
+    eda.tabs.setCurrentWidget(eda._matrix_tab)  # 4 variables checked by default
+    eda._check_listed(True)  # 6 fit; the example has 8
+    apply()
+    assert eda._matrix_side == 6 and len(eda._matrix_cells) == 36
+    cells = dict(eda._matrix_cells)
+    # Every row of the left column starts its plot area at the same x: one shared y gutter.
+    # (Wait for the layout: the rectangles are empty until the grid has been sized.)
+    qtbot.waitUntil(lambda: cells[(0, 0)].vb.sceneBoundingRect().width() > 1, timeout=2000)
+    lefts = {round(cells[(row, 0)].vb.sceneBoundingRect().left(), 3) for row in range(6)}
+    assert len(lefts) == 1 and lefts.pop() > 0
+    # The cells are drawn once, with a bounded number of points each.
+    points = {}
+    for (row, col), item in eda._matrix_items.items():
+        if row != col:
+            points[(row, col)] = len(item.getData()[0])
+    assert points and max(points.values()) <= MATRIX_DISPLAY_MAX
+    # The grid survives a change of variables, and a tick that changes nothing redraws nothing.
+    draws = []
+    original = eda._even_y_axes
+    monkeypatch.setattr(eda, "_even_y_axes", lambda: draws.append(1) or original())
+    eda.var_list.item(0).setCheckState(Qt.CheckState.Unchecked)
+    apply()
+    assert draws == [1]
+    assert all(eda._matrix_cells[key] is cells[key] for key in cells)  # same plots, new data
+    eda.var_list.item(0).setCheckState(Qt.CheckState.Checked)
+    apply()
+    assert draws == [1, 1]
+    apply()
+    assert draws == [1, 1]  # nothing changed: the scene is left as it is
+    # Fewer than two variables take the grid down, and it comes back on the next tick.
+    eda.check_none.click()
+    apply()
+    assert eda._matrix_side == 0 and not eda._matrix_cells
+    assert "Check 2–6 variables" in eda.matrix_note.text()
 
 
 def test_project_settings_change_display_timezone(qtbot, window):

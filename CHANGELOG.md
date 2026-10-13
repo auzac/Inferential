@@ -3,6 +3,18 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
+## v0.5.6 — Scatter matrix alignment and speed (2026-10-13)
+
+### Changed
+- **Scatter matrix**: the rows all start at the same place, so the six charts form a real grid.
+  Each y-axis used to size itself from whichever tick labels that one row happened to draw, so
+  the rows sat 12–36 px apart and their spines did not line up. The left column now shares one
+  width, measured from the labels every row will actually draw.
+- **Scatter matrix, faster**: ticking a variable redraws the grid instead of rebuilding it. The
+  plots are made once and refilled, and a tick that changes nothing is not drawn at all: about
+  0.6 s for the first draw (was 1.3–1.7 s), 0.04 s for a repeat. Each cell draws at most 1,000
+  evenly spaced points — a cell is roughly 90 × 50 px, so more of them were invisible.
+
 ## v0.5.5 — New window shell and themes (2026-10-12)
 
 ### Changed
