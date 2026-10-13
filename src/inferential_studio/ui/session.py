@@ -15,7 +15,7 @@ from inferential_studio.core.artifacts import compare_results, results_summary
 from inferential_studio.core.dataset import ProjectData, SourceData
 from inferential_studio.core.exclusions import CleaningState, compute_cleaning
 from inferential_studio.core.features import AlignmentError, FeatureMatrix, build_project_features
-from inferential_studio.core.models import TrainingRun
+from inferential_studio.core.models import ModelError, TrainingRun, evaluate_final_test
 from inferential_studio.core.persistence import (
     PORTABLE,
     REFERENCE,
@@ -496,6 +496,12 @@ class ProjectSession(QObject):
         self.reproduction = None
         saved = self.saved_results
         if reproduce and saved is not None:
+            self.test_revealed = bool(saved.get("test_revealed"))
+            selected = saved.get("selected_model")
+            if selected and any(m.name == selected and m.ok for m in run.models):
+                run.selected_model_name = selected
+            if self.test_revealed and run.search_subsets and run.selected_model_name:
+                evaluate_final_test(run, run.selected_model_name)
             diffs = compare_results(saved, run)
             when = str(saved.get("saved_at", ""))[:16].replace("T", " ")
             self.reproduction = (
@@ -503,11 +509,24 @@ class ProjectSession(QObject):
                 if not diffs
                 else f"⚠ Results differ from those saved on {when} UTC: " + " ".join(diffs[:4])
             )
-            # Having looked at the final test is a fact about the project, not about one run.
-            self.test_revealed = bool(saved.get("test_revealed"))
         self.training_changed.emit()
 
+    def select_model(self, model_name: str) -> None:
+        """Remember the candidate chosen for diagnostics, final-test reveal and export."""
+        run = self.training
+        if run is None or not any(m.name == model_name and m.ok for m in run.models):
+            return
+        if run.selected_model_name != model_name:
+            run.selected_model_name = model_name
+            self.mark_dirty()
+            self.training_changed.emit()
+
     def reveal_test(self) -> None:
+        if self.training is not None and self.training.search_subsets:
+            selected = self.training.selected_model_name
+            if selected is None:
+                raise ModelError("Choose a candidate before revealing the final test results.")
+            evaluate_final_test(self.training, selected)
         self.test_revealed = True
         self.training_changed.emit()
 

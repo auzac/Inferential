@@ -239,8 +239,13 @@ class ModelSetupPage(StagePage):
             "One-standard-error rule: choose the simplest setting (fewest components, largest "
             "alpha) whose mean CV error is within one standard error of the best."
         )
+        self.search_subsets = QCheckBox("Compare every non-empty input subset (up to 5 inputs)")
+        self.search_subsets.setToolTip(
+            "Trains every enabled model family on each subset of the selected inputs (maximum 31 subsets). "
+            "Candidates rank by training-period CV RMSE; validation is shown for review."
+        )
         for w in (self.train_pct, self.val_pct, self.train_end, self.test_start, self.auto_purge,
-                  self.purge, self.cv_kind, self.cv_folds, self.one_se):  # fmt: skip
+                  self.purge, self.cv_kind, self.cv_folds, self.one_se, self.search_subsets):  # fmt: skip
             self._watch(w)
         split_box = QGroupBox("Chronological split and cross-validation")
         form = QFormLayout(split_box)
@@ -268,6 +273,7 @@ class ModelSetupPage(StagePage):
         form.addRow("CV (training only)", self.cv_kind)
         form.addRow("CV folds", self.cv_folds)
         form.addRow("", self.one_se)
+        form.addRow("", self.search_subsets)
 
         self.train_button = QPushButton("Train models")
         self.train_button.setMinimumHeight(34)
@@ -281,8 +287,9 @@ class ModelSetupPage(StagePage):
         ll.addWidget(split_box)
         ll.addWidget(
             note_label(
-                "Hyperparameters are tuned only inside the training period. The validation period "
-                "ranks the models; the final test period stays untouched until you choose to "
+                "Hyperparameters are tuned only inside the training period. Validation ranks "
+                "ordinary model comparisons; input-subset search ranks on training CV and shows "
+                "validation for review. The final test stays untouched until you choose to "
                 "reveal it on the Validation page. The purge gap drops samples whose feature "
                 "windows would share process data with the next period."
             )
@@ -382,6 +389,7 @@ class ModelSetupPage(StagePage):
         self.cv_kind.setCurrentIndex(self.cv_kind.findData(sp.cv_kind.value))
         self.cv_folds.setValue(sp.cv_folds)
         self.one_se.setChecked(cfg.one_standard_error)
+        self.search_subsets.setChecked(cfg.search_subsets)
         self._loading = False
         self._sync_visibility()
         self._update_preview()
@@ -407,6 +415,7 @@ class ModelSetupPage(StagePage):
             split=split,
             models=tuple(row.spec() for row in self.rows.values()),
             one_standard_error=self.one_se.isChecked(),
+            search_subsets=self.search_subsets.isChecked(),
         )
 
     def _seed_dates(self) -> None:

@@ -168,6 +168,8 @@ def build_artifact(
     m = next((x for x in run.models if x.name == model_name), None)
     if m is None or not m.ok:
         raise ArtifactError(f"'{model_name}' is not a trained model of this run.")
+    if run.search_subsets and include_test and m.metric(TEST, "n") <= 0:
+        raise ArtifactError("The final test was evaluated only for the selected candidate.")
     variables = {v.name: v for v in project.variables}
     target = variables.get(run.target)
     labels = run.split.labels
@@ -190,7 +192,7 @@ def build_artifact(
         for s in shown
     }
     predictors = []
-    for name in run.features:
+    for name in (m.features or run.features):
         meta = variables.get(name)
         spec = run.feature_specs.get(name) or FeatureSpec(name)
         rng = run.train_ranges.loc[name]
@@ -484,7 +486,12 @@ def results_summary(run: TrainingRun, *, test_revealed: bool) -> dict[str, Any]:
     """Compact JSON record of a training run, saved in the project to check reproduction."""
     models = []
     for m in run.models:
-        entry: dict[str, Any] = {"name": m.name, "kind": m.spec.kind.value, "error": m.error}
+        entry: dict[str, Any] = {
+            "name": m.name,
+            "kind": m.spec.kind.value,
+            "error": m.error,
+            "features": list(m.features or run.features),
+        }
         if m.ok:
             shown = [s for s in SPLITS if s != TEST or test_revealed]
             entry.update(
@@ -503,6 +510,7 @@ def results_summary(run: TrainingRun, *, test_revealed: bool) -> dict[str, Any]:
         "libraries": dict(run.versions),
         "test_revealed": test_revealed,
         "features": list(run.features),
+        "selected_model": run.selected_model_name,
         "split_counts": run.split.counts(),
         "models": models,
     }
