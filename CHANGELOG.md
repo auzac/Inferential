@@ -3,13 +3,27 @@
 Versioning: `MAJOR.MINOR.PATCH`. Development milestones are tagged `v0.<milestone>.x`; the first
 production release is `v1.0.0`.
 
-## Unreleased — lag sensitivity correctness
+## v0.5.7 — Lag sensitivity correctness (2026-10-13)
 
-- M1: require a valid training cutoff; wait for cleaning and alignment instead of falling back to all samples.
-- M2: reject future-reading lag candidates and restrict predictor preprocessing to training history.
-- M3: honour the project regime-overlap policy during lag scans.
-- M4: invalidate scans on input changes and discard stale background results before display or application.
-- Regression tests cover missing scopes, causality, future missingness, regime rejection, and stale results.
+### Changed
+- **Lag sensitivity** works from the training period and nothing else. With no valid split it
+  declines to run and says so, instead of falling back to the whole history, and it waits for
+  cleaning and feature alignment to finish rather than reading a half-built feature matrix.
+  Candidate windows must be causal: a centred window needs enough delay to keep every candidate
+  in the past, and the message says which. The project's regime-overlap policy is applied to
+  every candidate delay. Pair counts can vary by delay — this is a single-predictor diagnostic,
+  not a multivariable identification test.
+- A scan is shown only for the inputs that produced it. Changing the predictor, its settings,
+  the split, the cleaning, the lag range or the step clears the plot and disables *Use best
+  delay as deadtime*; a background scan that finishes after any of those moved is discarded
+  rather than shown or applied, and a late-finishing older scan can no longer replace a newer
+  one.
+
+### Fixed
+- Predictor preprocessing during a scan is now bounded by the training cutoff, so missing data
+  after the cutoff can no longer change the sampling interval behind the coverage check — and
+  with it the correlation. Exclusions are copied before use, so a scan cannot write back into
+  the cleaning state.
 
 ## v0.5.6 — Scatter matrix alignment and speed (2026-10-13)
 
