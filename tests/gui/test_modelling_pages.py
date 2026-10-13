@@ -131,35 +131,41 @@ def test_training_reports_impossible_configuration(loaded, qtbot):
     assert vpage.model_combo.count() == 3  # only trained models have diagnostics
 
 
-def test_what_if_sliders_move_the_prediction(loaded, qtbot):
+def test_what_if_step_test_responds_like_the_soft_sensor(loaded, qtbot):
     import numpy as np
-
-    from inferential_studio.core.splits import TRAIN, VALIDATION
-    from inferential_studio.core.what_if import HOLD
 
     train(loaded, qtbot)
     vpage = loaded.pages["validation"]
     view = vpage.what_if
     assert vpage.tabs.indexOf(view) >= 0
-    base = view._base
-    assert base is not None and set(base.splits) <= {TRAIN, VALIDATION}  # test hidden
-    original = view._what_if.getData()[1].copy()
-    np.testing.assert_allclose(original, base.predicted)
-    top = view._controls[0]  # largest effect over the training range first
-    top.slider.setValue(1000)  # shift by the full training range
-    shifted = view._what_if.getData()[1]
-    np.testing.assert_allclose(shifted - original, top.inp.coefficient * top.inp.span)
-    assert "Δŷ" in top.effect.text() and "outside the training range" in view.summary.text()
-    second = view._controls[1]
-    second.mode.setCurrentIndex(second.mode.findData(HOLD))  # starts at the training mean
-    assert second.change()[1] == pytest.approx(second.inp.mean, abs=second.inp.span / 1000)
-    view.reset()
-    np.testing.assert_allclose(view._what_if.getData()[1], original)
-    assert "Move a slider" in view.summary.text()
-    # Another model keeps the sliders' settings when the inputs are the same.
-    top.slider.setValue(750)
+    assert view._model is not None and view.steps() == {}
+    assert "Steady state" in view.summary.text()
+    top = view._controls[0]  # largest possible effect first
+    top.slider.setValue(750)  # +50 % of the training range
+    qtbot.waitUntil(lambda: "settles" in view.summary.text(), timeout=2000)
+    step = top.step()
+    assert step == pytest.approx(0.5 * top.inp.span)
+    curve = next(i for i in view.output_chart.getPlotItem().listDataItems()
+                 if i.name() == "Prediction")  # fmt: skip
+    t, y = curve.getData()
+    step_at = view.step_at.value()
+    baseline = y[0]
+    assert np.allclose(y[t < step_at], baseline)  # steady state before the step
+    assert y[-1] - baseline == pytest.approx(top.inp.coefficient * step, rel=1e-9)
+    assert "Δŷ" in top.effect.text()
+    # Moving the step time moves the response with it.
+    view.step_at.setValue(step_at + 30)
+    qtbot.waitUntil(lambda: np.allclose(
+        next(i for i in view.output_chart.getPlotItem().listDataItems()
+             if i.name() == "Prediction").getData()[1][(t >= step_at) & (t < step_at + 30)],
+        baseline), timeout=2000)  # fmt: skip
+    # Another model of the same run keeps the steps and timing.
     vpage.model_combo.setCurrentIndex(1)
     same = next(c for c in view._controls if c.inp.name == top.inp.name)
-    assert same.slider.value() == 750
-    loaded.session.reveal_test()  # the test period joins once revealed
-    assert TEST in set(view._base.splits)
+    assert same.step() == pytest.approx(step) and view.step_at.value() == step_at + 30
+    view.reset()
+    assert view.steps() == {}
+    from inferential_studio.ui.widgets.what_if import COMPACT_HEIGHT
+
+    # Short screens: the inputs chart gives way to the prediction.
+    assert view.inputs_chart.isVisibleTo(view) == (view.height() >= COMPACT_HEIGHT)

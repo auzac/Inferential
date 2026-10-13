@@ -33,12 +33,12 @@ production release is `v1.0.0`.
   review, and the final test is evaluated only for the selected candidate when revealed.
 - The selected candidate and subset-search setting are saved with the project. Model cards and
   prediction exports include only the candidate's inputs.
-- **What-if** tab on Validation: the chosen model's prediction over time with one slider per
-  input (largest effect first). *Shift* offsets an input by up to ± its training range; *Hold*
-  keeps it at a value inside the training range. The original prediction stays visible; each
-  input shows its change of Y (Δŷ) and a warning appears when inputs leave the training range.
-  Exact for every model type (all are linear in their features); the final test period joins
-  only once revealed. Calculation in `core/what_if.py`.
+- **What-if** tab on Validation: a **step test** on the chosen model. Inputs start at steady
+  state (training means); at the step time the inputs set with their sliders (± their training
+  range) change and stay there. They pass through the model's own features, so the prediction
+  responds as the soft sensor would online: flat for the deadtime, a ramp over the window, an
+  EWMA lag, settling at coefficient × step. Input and prediction trends, final change, first
+  response and time to 95 %, and an extrapolation warning. Calculation in `core/what_if.py`.
 - Reference checks: every statistical method is validated against an independent textbook
   implementation (`tests/unit/test_reference_methods.py`, 31 checks) — MLR, PLS (incl. VIP), PCR,
   Ridge, the one-standard-error rule, splits and CV folds (no shared process data), descriptive
