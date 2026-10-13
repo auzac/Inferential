@@ -107,3 +107,115 @@ def test_lag_scan_runs_on_training_period(loaded, qtbot):
     assert scan.cutoff is not None and scan.cutoff < loaded.session.features.sample_time.max()
     assert np.isfinite(scan.pearson).all()
     assert page.lag_use.isEnabled()
+
+
+def test_lag_scan_without_training_scope_does_not_submit(loaded, monkeypatch):
+    page = loaded.pages["processing"]
+    monkeypatch.setattr(page, "training_cutoff", lambda: None)
+    monkeypatch.setattr(page._tasks, "submit", lambda *a, **k: pytest.fail("unexpected scan"))
+    page.run_lag_scan()
+    assert page._lag is None
+    assert not page.lag_use.isEnabled()
+    assert "training period" in loaded.session.messages.events[0].text
+
+
+@pytest.mark.parametrize(
+    "change", ["selection", "settings", "cleaning", "split", "data", "project", "range"]
+)
+def test_lag_scan_discards_results_after_inputs_change(loaded, monkeypatch, change):
+    from dataclasses import replace
+
+    from inferential_studio.core.features import LagScan
+
+    page = loaded.pages["processing"]
+    captured = {}
+    original_submit = page._tasks.submit
+
+    def submit(name, *args, **kwargs):
+        if name.startswith("Scanning delays"):
+            captured.update(kwargs)
+            return None
+        return original_submit(name, *args, **kwargs)
+
+    monkeypatch.setattr(page._tasks, "submit", submit)
+    page.run_lag_scan()
+    assert "on_result" in captured
+    name = page.current_variable()
+    cutoff = page.training_cutoff()
+    if change == "selection":
+        page.table.selectRow(1)
+    elif change == "settings":
+        loaded.session.set_lists(
+            features=[replace(s, window_s=s.window_s + 60) for s in page.specs()]
+        )
+    elif change == "cleaning":
+        loaded.session.recompute_cleaning()
+    elif change == "split":
+        loaded.session.set_lists(
+            modelling=replace(
+                loaded.session.project.modelling,
+                split=replace(loaded.session.project.modelling.split, train_fraction=0.5),
+            )
+        )
+    elif change == "data":
+        loaded.session._bump_data()
+    elif change == "project":
+        loaded.session.new()
+    else:
+        page.lag_max.setValue(60)
+    scan = LagScan(name, np.array([0.0, 60.0]), np.array([0.1, 0.9]), np.array([20, 20]), cutoff)
+    captured["on_result"](scan)
+    assert page._lag is None
+    assert not page.lag_use.isEnabled()
+    assert page.lag_run.isEnabled()
+
+
+def test_completed_lag_result_invalidated_before_application(loaded, qtbot):
+    from dataclasses import replace
+
+    page = loaded.pages["processing"]
+    page.run_lag_scan()
+    qtbot.waitUntil(lambda: page._lag is not None, timeout=30000)
+    assert page.lag_use.isEnabled()
+    before = list(loaded.session.project.features)
+    # Even an unsignalled configuration change is caught at application time.
+    cfg = loaded.session.project.modelling
+    loaded.session.project.modelling = replace(cfg, split=replace(cfg.split, train_fraction=0.5))
+    page._use_best_delay()
+    assert loaded.session.project.features == before
+    assert page._lag is None
+
+
+def test_older_scan_completion_cannot_replace_newer_request(loaded, monkeypatch):
+    from inferential_studio.core.features import LagScan
+
+    page = loaded.pages["processing"]
+    callbacks = []
+    monkeypatch.setattr(page._tasks, "submit", lambda *a, **kw: callbacks.append(kw["on_result"]))
+    page.run_lag_scan()
+    page.run_lag_scan()
+    scan = LagScan(
+        page.current_variable(),
+        np.array([0.0]),
+        np.array([0.9]),
+        np.array([20]),
+        page.training_cutoff(),
+    )
+    callbacks[0](scan)
+    assert page._lag is None and not page.lag_run.isEnabled()
+    callbacks[1](scan)
+    assert page._lag is scan and page.lag_use.isEnabled()
+
+
+def test_noncausal_lag_scan_reports_error_without_applicable_result(loaded, qtbot):
+    from dataclasses import replace
+
+    page = loaded.pages["processing"]
+    loaded.session.set_lists(
+        features=[replace(s, placement=WindowPlacement.CENTERED) for s in page.specs()]
+    )
+    qtbot.waitUntil(lambda: idle(loaded), timeout=30000)
+    page.run_lag_scan()
+    qtbot.waitUntil(lambda: page.lag_run.isEnabled(), timeout=30000)
+    assert page._lag is None and not page.lag_use.isEnabled()
+    assert "causal" in loaded.session.messages.events[0].text

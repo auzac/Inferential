@@ -538,6 +538,8 @@ def lag_scan(
     *,
     excluded: np.ndarray | None = None,
     cutoff: pd.Timestamp | None = None,
+    regime: np.ndarray | None = None,
+    reject_regime_overlap: bool = True,
     min_pairs: int = 10,
     cancel: CancelToken | None = None,
 ) -> LagScan:
@@ -546,20 +548,45 @@ def lag_scan(
     Only samples with valid, non-excluded Y at or before ``cutoff`` (the training period) are
     used, so the held-out test period never influences the choice of delay.
     """
-    signal = process_signal(raw, spec, excluded)
+    if cutoff is None:
+        raise AlignmentError("Define a valid training period before scanning delays.")
+    delays = np.asarray(delays_s, dtype=float)
+    if delays.ndim != 1 or not delays.size or not np.isfinite(delays).all():
+        raise AlignmentError("Supply a non-empty list of finite delays.")
+    trials = [
+        replace(spec, deadtime_s=max(float(d), 0.0), shift_s=min(float(d), 0.0)) for d in delays
+    ]
+    if any(not trial.is_causal for trial in trials):
+        raise AlignmentError(
+            "Lag selection requires causal windows. Use lookback placement or delays that keep every window in the past."
+        )
+    # Bound preprocessing too: future missingness must not change the sampling interval
+    # used for training-window coverage.
+    raw_scope = np.asarray(raw.index <= cutoff)
+    if excluded is not None:
+        excluded = np.asarray(excluded, dtype=bool)
+        if excluded.shape != (len(raw),):
+            raise AlignmentError("Predictor exclusions must match the predictor rows.")
+        excluded = excluded[raw_scope]
+    scoped_raw = raw.iloc[np.flatnonzero(raw_scope)]
+    signal = process_signal(scoped_raw, spec, excluded)
+    regime_ns = None
+    if reject_regime_overlap and regime is not None:
+        regime_mask = np.asarray(regime, dtype=bool)
+        if regime_mask.shape != (len(raw),):
+            raise AlignmentError("Regime exclusions must match the predictor rows.")
+        regime_ns = ns(raw.index)[regime_mask]
     times = pd.DatetimeIndex(target.times)
     y = np.asarray(target.values, dtype=float)
     use = ~np.isnan(y) & ~np.asarray(target.excluded, dtype=bool)
     if cutoff is not None:
         use &= np.asarray(times <= cutoff)
     sample_ns, y = ns(times)[use], y[use]
-    delays = np.asarray(delays_s, dtype=float)
     r = np.full(delays.size, np.nan)
     counts = np.zeros(delays.size, dtype=int)
-    for i, d in enumerate(delays):
+    for i, trial in enumerate(trials):
         check(cancel)
-        trial = replace(spec, deadtime_s=max(float(d), 0.0), shift_s=min(float(d), 0.0))
-        res = aggregate_windows(signal, sample_ns, trial)
+        res = aggregate_windows(signal, sample_ns, trial, regime_ns)
         ok = ~np.isnan(res.value)
         counts[i] = int(ok.sum())
         if counts[i] >= min_pairs and np.ptp(res.value[ok]) > 0 and np.ptp(y[ok]) > 0:

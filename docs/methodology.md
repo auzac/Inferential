@@ -173,10 +173,14 @@ consent, and composite lab samples with a collection interval.
   other predictors (complete rows). Constant predictors have no VIF; an exact linear combination
   has VIF = ∞. `|r| > 0.9` (adjustable) and `VIF > 10` are warnings, never automatic deletions.
 - **Sample impact**: for each predictor, how many more samples would be eligible without it.
-- **Lag sensitivity**: correlation of the aligned feature with Y for a range of effective
-  delays, computed **only on samples in the training period** of the current split settings,
-  so the final test period never influences the chosen delay. It is exploratory
-  (autocorrelation and common trends also correlate); choose a physically plausible delay.
+- **Lag sensitivity**: correlation of one aligned predictor with Y over candidate effective
+  delays. A valid training cutoff is required; there is no all-history fallback. Valid,
+  non-excluded targets at or before the last eligible training timestamp are considered.
+  All candidate windows must be causal. Predictor exclusions, coverage, gap limits and the
+  project's regime-overlap policy are applied for each candidate. Pair counts can vary by
+  delay; eligibility of other predictors is not required. Results are discarded if scan
+  inputs change, and obsolete results cannot be applied. It is exploratory (autocorrelation
+  and common trends also correlate); choose a physically plausible delay.
 
 ## Splits and cross-validation (`core/splits.py`)
 

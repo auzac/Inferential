@@ -265,7 +265,7 @@ def test_lag_scan_recovers_pure_deadtime():
     y = 2.0 * x[sample_min - 20] + rng.normal(0, 0.05, sample_min.size)  # 20-minute deadtime
     tgt = target([at(int(m)) for m in sample_min], values=y)
     spec = FeatureSpec("x", window_s=60, aggregation=Aggregation.LAST)
-    scan = lag_scan(tgt, xs, spec, np.arange(0, 3601, 60))
+    scan = lag_scan(tgt, xs, spec, np.arange(0, 3601, 60), cutoff=tgt.times.max())
     assert scan.best_delay_s == 1200
     # The scan respects the training cutoff: later samples are ignored.
     cut = lag_scan(tgt, xs, spec, np.array([1200.0]), cutoff=at(2000))
@@ -312,3 +312,76 @@ def test_vectorised_windows_match_direct_computation(agg):
         window = x[(x.index > lo) & (x.index <= hi)].to_numpy()
         expected = fn(window) if window.size else np.nan
         assert res.value[k] == pytest.approx(expected, rel=1e-12, nan_ok=True)
+
+
+def test_lag_scan_requires_training_cutoff():
+    x = minutes(range(30))
+    with pytest.raises(AlignmentError, match="training period"):
+        lag_scan(target([at(10)]), x, FeatureSpec("x"), np.array([0.0]))
+
+
+def test_lag_scan_rejects_future_reading_candidates():
+    x = minutes(range(100))
+    tgt = target([at(m) for m in range(20, 90, 5)])
+    spec = FeatureSpec("x", window_s=600, placement=WindowPlacement.CENTERED)
+    with pytest.raises(AlignmentError, match="causal"):
+        lag_scan(tgt, x, spec, np.array([0.0, 600.0]), cutoff=at(80))
+    with pytest.raises(AlignmentError, match="causal"):
+        lag_scan(tgt, x, FeatureSpec("x"), np.array([-60.0]), cutoff=at(80))
+    # A centered window is causal when its entire window is before the target.
+    scan = lag_scan(tgt, x, spec, np.array([600.0]), cutoff=at(80))
+    assert scan.n_pairs[0] > 0
+
+
+def test_lag_scan_ignores_predictor_data_after_training_cutoff():
+    x = minutes(np.random.default_rng(30).normal(size=200))
+    tgt = target([at(m) for m in range(30, 151, 10)])
+    spec = FeatureSpec("x", window_s=600, placement=WindowPlacement.CENTERED)
+    baseline = lag_scan(tgt, x, spec, np.array([300.0, 600.0]), cutoff=at(150))
+    future = x.copy()
+    future.loc[future.index > at(150)] = 1e6
+    changed = lag_scan(tgt, future, spec, np.array([300.0, 600.0]), cutoff=at(150))
+    np.testing.assert_array_equal(baseline.pearson, changed.pearson)
+
+
+def test_lag_scan_honours_regime_rejection_and_opt_out():
+    x = minutes(np.arange(100.0))
+    tgt = target([at(m) for m in range(10, 91, 5)])
+    spec = FeatureSpec("x", window_s=300, min_coverage=0.5)
+    regime = np.zeros(len(x), bool)
+    regime[9] = True
+    fm = build_feature_matrix(
+        tgt,
+        x.to_frame(),
+        [spec],
+        excluded=pd.DataFrame({"x": regime}, index=x.index),
+        regime=regime,
+    )
+    scan = lag_scan(tgt, x, spec, np.array([0.0]), excluded=regime, regime=regime, cutoff=at(90))
+    assert scan.n_pairs[0] == fm.eligible.sum() == 16
+    allowed = lag_scan(
+        tgt,
+        x,
+        spec,
+        np.array([0.0]),
+        excluded=regime,
+        regime=regime,
+        reject_regime_overlap=False,
+        cutoff=at(90),
+    )
+    assert allowed.n_pairs[0] == 17
+
+
+def test_lag_scan_future_missingness_cannot_change_training_coverage():
+    idx = pd.date_range(T0, periods=301, freq="1min")
+    values = np.full(301, np.nan)
+    values[:101:5] = np.arange(21.0)
+    values[101:] = np.arange(200.0)
+    x = pd.Series(values, index=idx, name="x")
+    tgt = target([at(m) for m in range(20, 101, 5)])
+    spec = FeatureSpec("x", window_s=300, min_coverage=0.8)
+    before = lag_scan(tgt, x, spec, np.array([0.0]), cutoff=at(100))
+    x.loc[x.index > at(100)] = np.nan
+    after = lag_scan(tgt, x, spec, np.array([0.0]), cutoff=at(100))
+    assert before.n_pairs[0] == after.n_pairs[0] == 17
+    np.testing.assert_array_equal(before.pearson, after.pearson)
