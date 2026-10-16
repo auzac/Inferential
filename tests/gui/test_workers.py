@@ -106,3 +106,22 @@ def test_unexpected_error_points_to_log(qtbot, manager):
 def test_friendly_message():
     assert friendly_message(ValueError("Too few lab samples.")) == "Too few lab samples."
     assert "unexpected" in friendly_message(ZeroDivisionError("x"))
+
+
+def test_export_committed_before_late_cancel_is_reported_as_saved(qtbot, manager, tmp_path):
+    import pandas as pd
+
+    from inferential_studio.core.exports import write_table
+
+    saved, cancelled = [], []
+    path = tmp_path / "saved.csv"
+
+    def atomic_write(*, progress=None, cancel=None):
+        return write_table(pd.DataFrame({"x": [1]}), path, cancel=cancel,
+                           progress=lambda f, _message: cancel.cancel() if f == 1 else None)
+
+    manager.submit("export", atomic_write, discard_cancelled_result=False,
+                   on_result=saved.append, on_cancelled=lambda: cancelled.append(True))
+    qtbot.waitUntil(lambda: not manager.busy)
+    assert saved == [path] and cancelled == []
+    assert pd.read_csv(path).iloc[0, 0] == 1

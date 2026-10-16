@@ -8,6 +8,7 @@ caller says the final test has been revealed.
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -16,9 +17,10 @@ import pandas as pd
 from inferential_studio.core.features import FeatureMatrix
 from inferential_studio.core.models import TrainingRun
 from inferential_studio.core.splits import TEST
+from inferential_studio.core.tasks import CancelToken, ProgressCallback, check, report
 
 
-class ExportError(Exception):
+class ExportError(ValueError):
     """An export could not be written. The message is shown to the user."""
 
 
@@ -86,20 +88,50 @@ def batch_prediction_table(table: pd.DataFrame, timezone: str = "UTC") -> pd.Dat
 
 
 def write_table(frame: pd.DataFrame, path: str | os.PathLike[str], *, sheet: str = "Data",
-                notes: list[str] | None = None) -> Path:  # fmt: skip
-    """Write CSV (UTF-8 with BOM so Excel opens it correctly) or .xlsx, chosen by extension."""
+                notes: list[str] | None = None, progress: ProgressCallback | None = None,
+                cancel: CancelToken | None = None) -> Path:  # fmt: skip
+    """Write in cancellable chunks, replacing the destination only after a complete file exists."""
     target = Path(path)
     suffix = target.suffix.lower()
+    if suffix not in (".csv", ".xlsx"):
+        raise ExportError("Choose a .csv or .xlsx file name.")
+    check(cancel)
+    tmp: Path | None = None
     try:
+        fd, name = tempfile.mkstemp(prefix=f".{target.stem}-", suffix=suffix, dir=target.parent)
+        os.close(fd)
+        tmp = Path(name)
+        starts = range(0, max(len(frame), 1), 2000)
         if suffix == ".csv":
-            frame.to_csv(target, index=False, encoding="utf-8-sig", lineterminator="\r\n")
-        elif suffix == ".xlsx":
-            with pd.ExcelWriter(target, engine="openpyxl") as writer:
-                frame.to_excel(writer, sheet_name=sheet[:31], index=False)
+            with tmp.open("w", encoding="utf-8-sig", newline="") as handle:
+                for start in starts:
+                    check(cancel)
+                    frame.iloc[start:start + 2000].to_csv(
+                        handle, index=False, header=start == 0, lineterminator="\r\n"
+                    )
+                    report(progress, .9 * min(start + 2000, len(frame)) / max(len(frame), 1),
+                           "Writing rows")
+        else:
+            with pd.ExcelWriter(tmp, engine="openpyxl") as writer:
+                writer.book.create_sheet(sheet[:31])  # cancellation before row 1 still closes safely
+                for start in starts:
+                    check(cancel)
+                    frame.iloc[start:start + 2000].to_excel(
+                        writer, sheet_name=sheet[:31], index=False, header=start == 0,
+                        startrow=0 if start == 0 else start + 1,
+                    )
+                    report(progress, .9 * min(start + 2000, len(frame)) / max(len(frame), 1),
+                           "Writing rows")
                 if notes:
                     pd.DataFrame({"Notes": notes}).to_excel(writer, sheet_name="Notes", index=False)
-        else:
-            raise ExportError("Choose a .csv or .xlsx file name.")
+                report(progress, .95, "Finishing workbook…")
+        check(cancel)
+        os.chmod(tmp, target.stat().st_mode & 0o777 if target.exists() else 0o644)
+        os.replace(tmp, target)
     except OSError as exc:
         raise ExportError(f"Could not write '{target}': {exc.strerror or exc}.") from exc
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+    report(progress, 1.0, "Saved")
     return target
