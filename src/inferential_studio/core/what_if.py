@@ -58,10 +58,6 @@ class StepModel:
     def coefficients(self) -> np.ndarray:
         return np.array([i.coefficient for i in self.inputs])
 
-    @property
-    def baseline_prediction(self) -> float:
-        return float(self.intercept + self.coefficients @ [i.baseline for i in self.inputs])
-
     def response_span_s(self) -> float:
         """Longest time from a step until every feature has fully taken it in."""
         spans = [data_span_s(i.spec)[1] - data_span_s(i.spec)[0] for i in self.inputs if i.spec]
@@ -113,6 +109,9 @@ def default_timing(model: StepModel) -> tuple[float, float]:
     return step_at, length
 
 
+Schedule = list[tuple[float, dict[str, float]]]  # (time_s, {input: change from baseline}), by time
+
+
 def simulate(
     model: StepModel,
     steps: dict[str, float],
@@ -124,54 +123,73 @@ def simulate(
     """Run the step test. ``steps`` = {input: change}; inputs not listed stay at baseline."""
     if length_s <= 0 or not 0 <= step_at_s <= length_s:
         raise ValueError("The step must happen within the run.")
-    dt = dt_s or _grid_step(model)
-    warmup = _round_up(_warmup_s(model) + dt, dt)  # windows and filters start at steady state
-    t_raw = np.arange(-warmup, length_s + dt / 2, dt)
+    dt = dt_s or grid_step(model)
     t_pred = np.arange(0.0, length_s + dt / 2, dt)
-    index = EPOCH + pd.to_timedelta(t_raw, unit="s")
-    after = t_raw >= step_at_s
-    frame = {}
-    for inp in model.inputs:
-        x = np.full(t_raw.size, inp.baseline)
-        x[after] += steps.get(inp.name, 0.0)
-        frame[inp.name] = x
-    process = pd.DataFrame(frame, index=index)
-    times = EPOCH + pd.to_timedelta(t_pred, unit="s")
-    n = t_pred.size
-    dummy = TargetSamples("__y__", pd.DatetimeIndex(times), np.zeros(n), np.zeros(n, bool),
-                          np.zeros(n, bool))  # fmt: skip
-    specs = [i.spec or _default_spec(i.name) for i in model.inputs]
-    fm = build_feature_matrix(dummy, process, specs)
-    names = [i.name for i in model.inputs]
-    X = fm.X[names].to_numpy(dtype=float)
-    ok = (fm.status[names] == "ok").all(axis=1).to_numpy()
-    predicted = np.where(ok, model.intercept + X @ model.coefficients, np.nan)
-    baseline = model.baseline_prediction
-    final = float(sum(i.coefficient * steps.get(i.name, 0.0) for i in model.inputs))
+    schedule = [(step_at_s, steps)]
+    predicted, ok, _ = _run(model, schedule, t_pred, dt)
+    baseline = steady_state(model, [], dt)
+    final = steady_state(model, steps, dt) - baseline
     first, settled = _timing(t_pred, predicted, baseline, final, step_at_s)
     outside = [
         i.name
         for i in model.inputs
         if steps.get(i.name, 0.0) and not i.low <= i.baseline + steps[i.name] <= i.high
     ]
-    notes = []
+    return StepResult(
+        t_pred, input_values(model, schedule, t_pred), predicted, baseline, final,
+        first, settled, outside, notes(model, ok),
+    )  # fmt: skip
+
+
+def respond(model: StepModel, schedule: Schedule, t_s: np.ndarray, dt_s: float) -> np.ndarray:
+    """Prediction at times ``t_s`` (multiples of ``dt_s``) while the inputs follow ``schedule``:
+    each entry holds from its time until the next; before the first, inputs sit at baseline."""
+    return _run(model, schedule, np.asarray(t_s, dtype=float), dt_s)[0]
+
+
+def steady_state(model: StepModel, changes: dict[str, float] | list, dt_s: float) -> float:
+    """Where the prediction settles with ``changes`` held. Simulated, not ``b₀ + Σ bⱼ·xⱼ``: a
+    standard-deviation feature is 0 at steady state, not its training mean."""
+    t = _round_up(_warmup_s(model) + model.response_span_s() + dt_s, dt_s)
+    return float(respond(model, [(0.0, dict(changes))], np.array([t]), dt_s)[0])
+
+
+def input_values(model: StepModel, schedule: Schedule, t: np.ndarray) -> dict[str, np.ndarray]:
+    """Each input's value at times ``t`` (baseline + its scheduled change)."""
+    times = np.array([e[0] for e in schedule], dtype=float)
+    k = np.searchsorted(times, t, side="right") - 1  # entry in force; −1 = before the first
+    out = {}
+    for inp in model.inputs:
+        change = np.array([0.0] + [e[1].get(inp.name, 0.0) for e in schedule])
+        out[inp.name] = inp.baseline + change[k + 1]
+    return out
+
+
+def notes(model: StepModel, ok: np.ndarray | None = None) -> list[str]:
+    """Caveats on how this model's features respond to stepped inputs."""
+    specs = [i.spec or _default_spec(i.name) for i in model.inputs]
+    out = []
     if any(s.aggregation is Aggregation.STD for s in specs):
-        notes.append(
+        out.append(
             "Standard-deviation features are 0 at steady state (no variation), which is usually "
             "outside their training range; they react to a step only while it passes through "
             "the window."
         )
-    if fm.non_causal:
-        notes.append(
+    centred = [s.variable for s in specs if not s.is_causal]
+    if centred:
+        out.append(
             "Centred windows read data after the sample time, so the prediction moves before "
-            "the step: " + ", ".join(fm.non_causal) + "."
+            "the step: " + ", ".join(centred) + "."
         )
-    if not ok.all():
-        notes.append("Some times have no prediction: a feature failed its coverage checks.")
-    return StepResult(
-        t_pred, {k: v[t_raw >= 0] for k, v in frame.items()}, predicted, baseline, final,
-        first, settled, outside, notes,
-    )  # fmt: skip
+    if ok is not None and not ok.all():
+        out.append("Some times have no prediction: a feature failed its coverage checks.")
+    return out
+
+
+def grid_step(model: StepModel) -> float:
+    """1 minute, finer for windows shorter than 10 minutes (at least 10 points per window)."""
+    windows = [i.spec.window_s for i in model.inputs if i.spec]
+    return float(max(1.0, min(60.0, min(windows, default=600.0) / 10)))
 
 
 # --------------------------------------------------------------------------- internals
@@ -179,6 +197,27 @@ def simulate(
 
 def _round_up(value: float, step: float) -> float:
     return float(np.ceil(value / step) * step)
+
+
+def _run(model: StepModel, schedule: Schedule, t_pred: np.ndarray, dt: float):  # noqa: ANN202
+    """Inputs on a ``dt`` grid from a steady-state lead-in (windows and filters start settled)
+    to the last time a feature reads (centred windows read ahead; inputs hold), through the
+    model's own feature pipeline."""
+    lead = max([0.0] + [data_span_s(i.spec)[1] for i in model.inputs if i.spec])
+    t0 = t_pred[0] - _round_up(_warmup_s(model) + dt, dt)
+    t_raw = np.arange(t0, t_pred[-1] + _round_up(lead, dt) + dt / 2, dt)
+    process = pd.DataFrame(input_values(model, schedule, t_raw),
+                           index=EPOCH + pd.to_timedelta(t_raw, unit="s"))  # fmt: skip
+    n = t_pred.size
+    times = pd.DatetimeIndex(EPOCH + pd.to_timedelta(t_pred, unit="s"))
+    dummy = TargetSamples("__y__", times, np.zeros(n), np.zeros(n, bool), np.zeros(n, bool))
+    fm = build_feature_matrix(
+        dummy, process, [i.spec or _default_spec(i.name) for i in model.inputs]
+    )
+    names = [i.name for i in model.inputs]
+    X = fm.X[names].to_numpy(dtype=float)
+    ok = (fm.status[names] == "ok").all(axis=1).to_numpy()
+    return np.where(ok, model.intercept + X @ model.coefficients, np.nan), ok, fm
 
 
 def _warmup_s(model: StepModel) -> float:
@@ -189,12 +228,6 @@ def _warmup_s(model: StepModel) -> float:
             start = -data_span_s(i.spec)[0]
             out = max(out, start + EWMA_WARMUP_HALFLIVES * float(f.halflife_s))
     return out
-
-
-def _grid_step(model: StepModel) -> float:
-    """1 minute, finer for windows shorter than 10 minutes (at least 10 points per window)."""
-    windows = [i.spec.window_s for i in model.inputs if i.spec]
-    return float(max(1.0, min(60.0, min(windows, default=600.0) / 10)))
 
 
 def _default_spec(name: str) -> FeatureSpec:
