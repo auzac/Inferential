@@ -62,7 +62,8 @@ def test_compact_validation_keeps_diagnostics_and_controls_reachable(loaded, qtb
     assert page.tabs.height() >= 260
     assert not page.what_if.inputs_chart.isVisibleTo(page.what_if)
     assert page.what_if.output_chart.height() >= 150
-    assert page.what_if.length.isVisibleTo(page)
+    assert page.what_if.pause_button.isVisibleTo(page)
+    assert page.what_if.reset_button.isVisibleTo(page)
     viewport = page.what_if._list.parentWidget()
     list_top = viewport.mapTo(page.what_if.summary.parentWidget(), QPoint()).y()
     assert page.what_if.summary.geometry().bottom() < list_top
