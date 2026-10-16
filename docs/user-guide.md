@@ -21,6 +21,14 @@ this guide inside the application (offline).
 the name). The button at its top slides the stage names out over the page; choosing a stage, Esc
 or a click anywhere else closes it again. The page underneath never moves or resizes.
 
+**Progress.** The bar at the right of each page header has one segment per stage: full colour
+when the stage is done, a soft tone when it was started but still needs something, faint when not
+started; the current stage is drawn taller. Hover a segment to see what it still needs, click it
+to go there. Stages that produce something are done when it exists (data loaded, target and
+predictors chosen, features aligned, a current training run, an export saved); the review stages
+(Initial EDA, Cleaning, Model Setup, Validation) once you have visited them. Progress is saved
+with the project, so a reopened project shows where you left off.
+
 The window remembers its size, position and your Help panel choice between sessions. If the
 custom title bar does not suit a screen reader or a window-management tool, *Settings → Use the
 system title bar* brings back the standard Windows frame (after a restart).

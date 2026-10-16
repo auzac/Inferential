@@ -11,6 +11,7 @@ from inferential_studio.core.splits import TEST
 from inferential_studio.infrastructure.settings import AppSettings
 from inferential_studio.ui.commands import edit_lists
 from inferential_studio.ui.main_window import MainWindow
+from inferential_studio.ui.stages import STAGES
 
 EXAMPLE_DIR = Path(__file__).resolve().parents[2] / "examples" / "synthetic_distillation"
 
@@ -208,6 +209,40 @@ def test_what_if_live_trend_responds_like_the_soft_sensor(loaded, qtbot):
 
     # Short screens: the inputs chart gives way to the prediction.
     assert view.inputs_chart.isVisibleTo(view) == (view.height() >= COMPACT_HEIGHT)
+
+
+def test_progress_bar_shows_where_the_workflow_stands(loaded, qtbot, tmp_path):
+    from inferential_studio.ui.stages import ATTENTION, DONE, TODO
+
+    page = loaded.pages["model_setup"]
+
+    def states() -> dict[str, str]:
+        return {s.key: st for s, (st, _note) in zip(STAGES, page.progress._states, strict=True)}
+
+    # Opened with data, target, predictors and aligned features; Model Setup is open.
+    s = states()
+    assert s["import"] == s["variables"] == s["processing"] == s["model_setup"] == DONE
+    assert s["initial_eda"] == s["validation"] == s["export"] == TODO
+    loaded.sidebar.setCurrentRow(1)  # reviewing EDA counts
+    assert states()["initial_eda"] == DONE
+    loaded.sidebar.setCurrentRow(7)  # Validation before training: started, not finished
+    if loaded.session.training is None:
+        assert states()["validation"] == ATTENTION
+    train(loaded, qtbot)
+    assert states()["training"] == states()["validation"] == DONE
+    # Run-wide warnings (autocorrelation) are reported once, not again for the selected model.
+    run_wide = [p.message for p in loaded.session.training.problems if p.severity != "error"]
+    model_msg = loaded.session.messages.condition("training.model")
+    assert run_wide and not (model_msg and any(w in model_msg.text for w in run_wide))
+    loaded.sidebar.setCurrentRow(8)
+    assert states()["export"] == TODO  # visiting Export is not exporting
+    loaded.pages["export"]._done(tmp_path / "card.html")
+    assert states()["export"] == DONE
+    done = sum(st == DONE for st in states().values())
+    assert page.progress_label.text() == f"{done} of {len(STAGES)} done"
+    assert "export" in loaded.session.project.progress and not loaded.session.dirty
+    page.progress.stage_clicked.emit(2)  # a segment opens its stage
+    assert loaded.sidebar.currentRow() == 2
 
 
 @pytest.mark.parametrize("subsets,validation", [(False, True), (False, False), (True, True), (True, False)])

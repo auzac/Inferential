@@ -236,8 +236,11 @@ class TrainingPage(StagePage):
             for plot in (self.load_plot, self.score_plot, self.var_plot):
                 show_placeholder(plot, f"{m.spec.label} has no latent components: loadings, "
                                        "VIP, scores and explained variance apply to PLS and PCR.")  # fmt: skip
-        if m.warnings:
-            msgs.set("training.model", Level.WARNING, f"{m.name}: " + " ".join(m.warnings),
+        # Run-wide warnings (e.g. autocorrelation) are already reported once for the whole run.
+        run_wide = {p.message for p in self._session.training.problems}
+        own = [w for w in m.warnings if w not in run_wide]
+        if own:
+            msgs.set("training.model", Level.WARNING, f"{m.name}: " + " ".join(own),
                      also=("validation",))  # fmt: skip
 
     def _units(self) -> dict[str, str | None]:

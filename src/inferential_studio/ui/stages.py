@@ -1,8 +1,13 @@
-"""The nine workflow stages shown in the navigation rail, in workflow order (plain data)."""
+"""The nine workflow stages shown in the navigation rail, in workflow order, and how far along
+each one a project is (for the progress bar)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from inferential_studio.ui.session import ProjectSession
 
 
 @dataclass(frozen=True)
@@ -89,3 +94,46 @@ STAGES: tuple[Stage, ...] = (
         icon="share",
     ),
 )
+
+
+DONE, ATTENTION, TODO = "done", "attention", "todo"
+
+
+def stage_states(session: ProjectSession) -> list[tuple[str, str]]:
+    """``(state, note)`` per stage, in workflow order, for the progress bar.
+
+    Stages that leave something behind are done when it is there (data loaded, target and
+    predictors chosen, features aligned, a current training run, an export written); review
+    stages are done once visited. Visited but not done needs attention.
+    """
+    p, visited = session.project, set(session.project.progress)
+    trained = session.training is not None
+    met = {
+        "import": bool(session.data.sources) and not session.data.failures,
+        "initial_eda": "initial_eda" in visited,
+        "cleaning": "cleaning" in visited,
+        "variables": p.target is not None and bool(p.predictors),
+        "processing": session.features is not None,
+        "model_setup": "model_setup" in visited and any(m.enabled for m in p.modelling.models),
+        "training": trained and not session.training_stale,
+        "validation": "validation" in visited and trained,
+        "export": "export" in visited,
+    }
+    todo = {
+        "import": "Load process and lab data.",
+        "variables": "Choose the target and at least one predictor.",
+        "processing": session.features_error or "Features are not aligned yet.",
+        "model_setup": "Enable at least one model.",
+        "training": "Inputs changed since training: train again." if trained else "Train models.",
+        "validation": "Train models first.",
+        "export": "Save a model card, predictions or model file.",
+    }
+    out = []
+    for stage in STAGES:
+        if met[stage.key]:
+            out.append((DONE, "Done."))
+        elif stage.key in visited or (stage.key == "training" and trained):
+            out.append((ATTENTION, todo.get(stage.key, "")))
+        else:
+            out.append((TODO, "Not started."))
+    return out

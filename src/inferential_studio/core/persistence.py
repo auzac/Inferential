@@ -365,9 +365,14 @@ def _v5_to_v6(project_data: Any) -> Any:
     return project_data
 
 
+def _v6_to_v7(project_data: Any) -> Any:
+    """v7 added workflow progress (stages visited); old projects start with none."""
+    return project_data
+
+
 # Map "from version" -> function converting project JSON to version + 1.
 _MIGRATIONS: dict[int, Any] = {
-    1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6
+    1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7
 }
 
 
