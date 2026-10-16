@@ -160,7 +160,7 @@ def test_training_reports_impossible_configuration(loaded, qtbot):
     assert vpage.model_combo.count() == 3  # only trained models have diagnostics
 
 
-def test_what_if_step_test_responds_like_the_soft_sensor(loaded, qtbot):
+def test_what_if_live_trend_responds_like_the_soft_sensor(loaded, qtbot):
     import numpy as np
 
     train(loaded, qtbot)
@@ -168,32 +168,31 @@ def test_what_if_step_test_responds_like_the_soft_sensor(loaded, qtbot):
     view = vpage.what_if
     assert vpage.tabs.indexOf(view) >= 0
     assert view._model is not None and view.steps() == {}
-    assert "Steady state" in view.summary.text()
+    assert "steady state" in view.summary.text()
+    baseline = view._baseline
+    assert np.allclose(view._y, baseline)  # starts settled
     top = view._controls[0]  # largest possible effect first
-    top.slider.setValue(750)  # +50 % of the training range
-    qtbot.waitUntil(lambda: "settles" in view.summary.text(), timeout=2000)
+    top.slider.setValue(750)  # +50 % of the training range: changes now
     step = top.step()
-    assert step == pytest.approx(0.5 * top.inp.span)
-    curve = next(i for i in view.output_chart.getPlotItem().listDataItems()
-                 if i.name() == "Prediction")  # fmt: skip
-    t, y = curve.getData()
-    step_at = view.step_at.value()
-    baseline = y[0]
-    assert np.allclose(y[t < step_at], baseline)  # steady state before the step
-    assert y[-1] - baseline == pytest.approx(top.inp.coefficient * step, rel=1e-9)
-    assert "Δŷ" in top.effect.text()
-    # Moving the step time moves the response with it.
-    view.step_at.setValue(step_at + 30)
-    qtbot.waitUntil(lambda: np.allclose(
-        next(i for i in view.output_chart.getPlotItem().listDataItems()
-             if i.name() == "Prediction").getData()[1][(t >= step_at) & (t < step_at + 30)],
-        baseline), timeout=2000)  # fmt: skip
-    # Another model of the same run keeps the steps and timing.
+    assert step == pytest.approx(0.5 * top.inp.span) and "Δŷ" in top.effect.text()
+    expected = top.inp.coefficient * step
+    assert view._target - baseline == pytest.approx(expected, rel=1e-9)
+    assert "settling at" in view.summary.text()
+    stepped_at = view._schedule[-1][0]
+    # The clock runs: nothing moves before the change, then it settles at coefficient × step.
+    while view._t[-1] < stepped_at + view._view:
+        view._tick()
+    before = view._t < stepped_at
+    assert np.allclose(view._y[before], baseline)
+    assert view._y[-1] - baseline == pytest.approx(expected, rel=1e-9)
+    assert view._t[-1] - view._t[0] <= view._view + view._dt  # the trend scrolls
+    # Another model of the same run keeps the changes and starts settled at them.
     vpage.model_combo.setCurrentIndex(1)
     same = next(c for c in view._controls if c.inp.name == top.inp.name)
-    assert same.step() == pytest.approx(step) and view.step_at.value() == step_at + 30
+    assert same.step() == pytest.approx(step)
+    assert view._y[-1] == pytest.approx(view._target, rel=1e-9)
     view.reset()
-    assert view.steps() == {}
+    assert view.steps() == {} and np.allclose(view._y, view._baseline)
     from inferential_studio.ui.widgets.what_if import COMPACT_HEIGHT
 
     # Short screens: the inputs chart gives way to the prediction.

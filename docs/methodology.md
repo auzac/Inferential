@@ -266,12 +266,15 @@ consecutive lab samples with ±1.96/√n reference lines. Applicability: trainin
 maximum, mean and SD of every feature, and how many validation/test samples fall outside the
 training range.
 
-**What-if step test** (`core/what_if.py`): synthetic inputs on a regular grid (1 min, finer for
-windows under 10 min) sit at their training means, preceded by a steady-state lead-in long
-enough for every window and filter (20 half-lives for an EWMA, whose weights are normalised over
-the available history). At the step time the chosen inputs change by their steps. Features are
-built with the model's stored definitions by the same code as training and batch prediction,
-and `ŷ = b₀ + Σ bⱼ fⱼ` is evaluated at every grid time. The final change is exactly `Σ bⱼ·Δⱼ`;
+**What-if** (`core/what_if.py`): synthetic inputs on a regular grid (1 min, finer for windows
+under 10 min) sit at their training means, preceded by a steady-state lead-in long enough for
+every window and filter (20 half-lives for an EWMA, whose weights are normalised over the
+available history). They then follow a schedule of changes, each held until the next (the
+step test: one change at the step time; the live trend: one per slider move, at the next grid
+time; inputs hold where a centred window reads ahead). Features are built with the model's
+stored definitions by the same code as training and batch prediction, and `ŷ = b₀ + Σ bⱼ fⱼ`
+is evaluated at every grid time. Steady states are simulated too (a standard-deviation feature
+is 0 there, not its training mean), so the final change is `Σ bⱼ·Δⱼ` over the other features;
 the first response is the first time the prediction moves (the deadtime for lookback windows,
 before the step for centred ones) and *settled* is when it stays at or beyond 95 % of the final
 change. Tested against the discrete deadtime + moving-average response and the first-order

@@ -8,12 +8,19 @@ import pytest
 
 from inferential_studio.core.features import TargetSamples, build_feature_matrix
 from inferential_studio.core.models import train_models
-from inferential_studio.core.schemas import FeatureSpec, FilterKind, FilterSpec, WindowPlacement
+from inferential_studio.core.schemas import (
+    Aggregation,
+    FeatureSpec,
+    FilterKind,
+    FilterSpec,
+    WindowPlacement,
+)
 from inferential_studio.core.synthetic import build_sample_project
 from inferential_studio.core.what_if import (
     StepInput,
     StepModel,
     default_timing,
+    respond,
     simulate,
     step_model,
 )
@@ -98,3 +105,22 @@ def test_every_trained_model_settles_at_coefficient_times_step(run):
         before = res.t_s < step_at
         np.testing.assert_allclose(res.predicted[before], res.baseline, rtol=1e-12)
         assert res.settled_s is not None
+
+
+def test_std_feature_is_zero_at_steady_state_and_its_step_fades():
+    spec = FeatureSpec("x", window_s=600.0)
+    std = StepInput("s", 3.0, 0.5, 0.1, 1.0, None,
+                    replace(spec, variable="s", aggregation=Aggregation.STD))  # fmt: skip
+    m = StepModel("y", 1.0, [StepInput("x", 2.0, 10.0, 5.0, 15.0, None, spec), std])
+    res = simulate(m, {"x": 1.0}, 900.0, 3600.0, dt_s=60.0)
+    assert res.baseline == pytest.approx(1.0 + 2.0 * 10.0)  # the std feature reads 0, not 0.5
+    assert res.first_response_s == pytest.approx(0.0) and res.settled_s is not None
+    res = simulate(m, {"s": 0.2}, 900.0, 3600.0, dt_s=60.0)
+    assert res.final_change == 0.0 and res.predicted[-1] == pytest.approx(res.baseline)
+
+
+def test_live_schedule_applies_each_change_from_its_time():
+    m = one_input(FeatureSpec("x", window_s=60.0, aggregation="last"), b=2.0)
+    t = np.arange(0.0, 600.0, 60.0)
+    y = respond(m, [(120.0, {"x": 1.0}), (300.0, {"x": -1.0})], t, 60.0)
+    np.testing.assert_allclose(y, 21.0 + 2.0 * np.array([0, 0, 1, 1, 1, -1, -1, -1, -1, -1]))
