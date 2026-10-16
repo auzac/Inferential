@@ -303,3 +303,71 @@ def test_menu_highlight_differs_from_the_menu_background():
     for name in (theme.LIGHT, theme.DARK):
         t = theme.THEMES[name]
         assert t["menu_hover"] != t["surface"]  # the highlighted row must read on menus
+
+
+def test_accessible_shell_names_states_and_keyboard(qtbot, window):
+    from PySide6.QtGui import QAccessible
+
+    bar = window.title_bar
+
+    def accessible(widget):
+        interface = QAccessible.queryAccessibleInterface(widget)
+        assert interface is not None
+        return interface
+
+    switch = accessible(bar.theme_switch)
+    assert switch.text(QAccessible.Text.Name) == "Dark theme"
+    assert switch.role() == QAccessible.Role.CheckBox
+    bar.theme_switch.set_dark(False)
+    assert not switch.state().checked
+    bar.theme_switch.setFocus(Qt.FocusReason.TabFocusReason)
+    qtbot.keyClick(bar.theme_switch, Qt.Key.Key_Space)
+    assert switch.state().checked
+
+    toggle = accessible(window.nav.toggle)
+    assert toggle.text(QAccessible.Text.Name) == "Show stage names"
+    window.nav.toggle.setFocus(Qt.FocusReason.TabFocusReason)
+    qtbot.keyClick(window.nav.toggle, Qt.Key.Key_Space)
+    assert window.nav.expanded
+    assert toggle.text(QAccessible.Text.Name) == "Hide stage names"
+
+    for button, name in ((bar.min_button, "Minimise"), (bar.max_button, "Maximise"),
+                         (bar.close_button, "Close")):
+        interface = accessible(button)
+        assert interface.text(QAccessible.Text.Name) == name
+        assert interface.role() == QAccessible.Role.Button
+        assert interface.state().focusable
+        assert button.focusPolicy() == Qt.FocusPolicy.TabFocus
+
+    bar.min_button.setFocus(Qt.FocusReason.TabFocusReason)
+    qtbot.keyClick(bar.min_button, Qt.Key.Key_Tab)
+    assert bar.max_button.hasFocus()
+    qtbot.keyClick(bar.max_button, Qt.Key.Key_Tab)
+    assert bar.close_button.hasFocus()
+    for button in [bar.menu_button, bar.help_button, *bar.command_buttons]:
+        assert accessible(button).text(QAccessible.Text.Name)
+
+    window.showMaximized()
+    qtbot.waitUntil(lambda: window.isMaximized())
+    bar.update_window_state()
+    assert accessible(bar.max_button).text(QAccessible.Text.Name) == "Restore down"
+    bar.max_button.setFocus(Qt.FocusReason.TabFocusReason)
+    qtbot.keyClick(bar.max_button, Qt.Key.Key_Space)
+    qtbot.waitUntil(lambda: not window.isMaximized())
+    assert accessible(bar.max_button).text(QAccessible.Text.Name) == "Maximise"
+
+
+@pytest.mark.parametrize("name", [theme.LIGHT, theme.DARK])
+def test_primary_button_enabled_text_contrast(name):
+    def luminance(colour):
+        channels = [int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+                  for c in channels]
+        return sum(c * weight for c, weight in zip(linear, (0.2126, 0.7152, 0.0722), strict=True))
+
+    palette = theme.THEMES[name]
+    foreground = luminance(palette["on_accent"])
+    for state in ("accent", "accent_hover", "accent_pressed"):
+        background = luminance(palette[state])
+        ratio = (max(foreground, background) + 0.05) / (min(foreground, background) + 0.05)
+        assert ratio >= 4.5, (name, state, ratio)

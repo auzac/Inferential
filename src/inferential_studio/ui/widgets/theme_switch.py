@@ -19,6 +19,7 @@ class ThemeSwitch(QAbstractButton):
         super().__init__(parent)
         self.setObjectName("themeSwitch")
         self.setCheckable(True)
+        self.setAccessibleName("Dark theme")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self._pos = 0.0  # knob position 0 (light) … 1 (dark)

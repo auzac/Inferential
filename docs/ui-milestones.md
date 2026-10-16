@@ -86,19 +86,19 @@ opened, the ranking metric is visible at the initial horizontal scroll position.
 
 ## Milestone 7 — Accessible control names (audit finding 7)
 
-**Deferred for reassessment.**
+**Implemented; target-platform screen-reader check pending.**
 
-- [ ] Recheck the theme switch, navigation toggle and caption controls with Qt accessibility queries.
-- [ ] Add missing names and visible keyboard focus where needed.
+- [x] Recheck the theme switch, navigation toggle and caption controls with Qt accessibility queries.
+- [x] Add missing names and visible keyboard focus where needed.
 - [ ] Verify names, roles and states with a screen reader on the target platform.
 
 ## Milestone 8 — Primary-button contrast (audit finding 8)
 
-**Deferred for reassessment.**
+**Implemented and locally verified.**
 
-- [ ] Recalculate light-theme primary-button text contrast after any palette changes.
-- [ ] Adjust the accent if it still falls below the chosen 4.5:1 normal-text benchmark.
-- [ ] Verify default, hover, pressed and focus states visually.
+- [x] Recalculate light-theme primary-button text contrast after any palette changes.
+- [x] Adjust the accent if it still falls below the chosen 4.5:1 normal-text benchmark.
+- [x] Verify default, hover, pressed and focus states visually.
 
 ## Local verification for milestones 1–3
 
@@ -123,7 +123,7 @@ opened, the ranking metric is visible at the initial horizontal scroll position.
 - **410 tests passed, one deselected**, with the import-wizard file excluded for the known
   macOS offscreen abort and the existing shortcut assertion deselected for its Ctrl/Command mismatch.
 - Lint passes. Normal/subset ranking and live-view layouts were rendered for visual review.
-- Milestones 7–8 remain deferred. No accessibility-name or palette changes are included.
+- This run covered milestones 4–6; milestones 7–8 are verified separately below.
 
 ### Remaining platform checks
 
@@ -131,3 +131,24 @@ opened, the ranking metric is visible at the initial horizontal scroll position.
 - [ ] Repeat layout checks at Windows 125–200% scaling.
 - [ ] Rerun the import-wizard GUI tests on a supported display; macOS offscreen aborted at wizard.show().
 - [ ] Reassess the existing shortcut assertion on macOS separately from these UI changes.
+
+## Follow-up verification for milestones 7–8
+
+- Theme switch exposes the stable name “Dark theme” and Qt checkbox checked state.
+- Navigation names follow Show/Hide stage names; caption names follow their action,
+  including Maximise/Restore down. Caption controls now accept keyboard focus.
+- Shell buttons have explicit focus borders; the theme switch retains its painted focus ring.
+  Primary buttons have a contrasting focus border without changing their padding footprint.
+- Light accent changed from `#c15f3c` to `#b85a38`: white primary text contrast
+  **4.23:1 → 4.61:1**. Hover is **5.13:1**, pressed **6.44:1**.
+  Dark-theme ratios are **10.47:1**, **8.72:1**, **7.26:1** respectively.
+  Disabled controls are excluded from this normal-text benchmark.
+- Qt accessibility queries and Space activation pass for theme/navigation controls;
+  caption roles, focusability and maximise/restore name changes have regression coverage.
+- Light/dark focus indicators and primary default/hover/pressed/focus renderings reviewed
+  at 960×640. Captures and measurements: `../ui-audit/milestones-7-8/` (local artifacts).
+- Broad suite: **413 passed, one deselected**, one existing pandas warning; same import-wizard
+  exclusion and macOS shortcut deselection described above. Final shell checks: **21 passed**.
+  Lint and whitespace checks pass.
+- Windows screen-reader verification and display scaling remain pending; this is not a
+  claim of full accessibility compliance. PR is left open for Claude to assess and merge.
