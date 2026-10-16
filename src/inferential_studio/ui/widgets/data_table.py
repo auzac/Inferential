@@ -11,15 +11,31 @@ from PySide6.QtCore import (
     QEvent,
     QModelIndex,
     QObject,
-    QSortFilterProxyModel,
     Qt,
 )
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHeaderView, QTableView, QWidget
 
+from inferential_studio.core.tasks import check
+from inferential_studio.infrastructure.workers import TaskManager
+
 NUMERIC_ZERO = 1e-14  # smaller magnitudes are floating-point residue (e.g. an OLS bias)
 GROUP_FROM = 10_000  # thousands separators from five digits up (years and ids stay plain)
 COLUMN_MAX = 260  # px: no column is measured wider than this (long text elides instead)
+BACKGROUND_SORT_ROWS = 10_000
+
+
+def _sorted_rows(values: pd.Series, ascending: bool, *, progress=None, cancel=None) -> np.ndarray:
+    """Return source row positions; numeric values keep their full precision."""
+    check(cancel)
+    keys = values.reset_index(drop=True)
+    if not (pd.api.types.is_numeric_dtype(keys.dtype) and not pd.api.types.is_bool_dtype(keys.dtype)):
+        keys = keys.map(format_value)
+    rows = keys.sort_values(
+        ascending=ascending, kind="stable", na_position="first" if ascending else "last"
+    ).index.to_numpy()
+    check(cancel)
+    return rows
 
 
 def format_value(value: object) -> str:
@@ -65,12 +81,20 @@ class DataFrameModel(QAbstractTableModel):
         self._numeric_cols: list[bool] = []
         self._headers = headers or {}
         self._row_colours: dict[int, QColor] = {}
+        self._order = np.array([], dtype=np.intp)
+        self._sort_column = -1
+        self._ascending = True
+        self._generation = 0
+        self._sort_tasks = TaskManager(self, max_threads=1)
         if frame is not None:
             self.set_frame(frame)
 
     def set_frame(self, frame: pd.DataFrame, headers: dict[str, str] | None = None) -> None:
+        self._generation += 1
+        self._sort_tasks.cancel_all()
         self.beginResetModel()
         self._frame = frame
+        self._order = np.arange(len(frame))
         self._columns = [frame.iloc[:, j].to_numpy() for j in range(frame.shape[1])]
         self._numeric_cols = [
             bool(pd.api.types.is_numeric_dtype(dtype) and not pd.api.types.is_bool_dtype(dtype))
@@ -80,6 +104,37 @@ class DataFrameModel(QAbstractTableModel):
             self._headers = headers
         self._row_colours = {}
         self.endResetModel()
+        if self._sort_column >= 0:
+            self.sort(self._sort_column, Qt.SortOrder.AscendingOrder if self._ascending
+                      else Qt.SortOrder.DescendingOrder)
+
+    def sort(self, column: int, order=Qt.SortOrder.AscendingOrder) -> None:
+        self._generation += 1
+        generation = self._generation
+        self._sort_tasks.cancel_all()
+        self._sort_column = column
+        self._ascending = order == Qt.SortOrder.AscendingOrder
+        if column < 0 or column >= len(self._columns):
+            self._apply_order(np.arange(len(self._frame)), generation)
+        elif len(self._frame) < BACKGROUND_SORT_ROWS:
+            self._apply_order(_sorted_rows(self._frame.iloc[:, column], self._ascending), generation)
+        else:
+            self._sort_tasks.submit(
+                "Sorting table", _sorted_rows, self._frame.iloc[:, column], self._ascending,
+                on_result=lambda rows: self._apply_order(rows, generation),
+            )
+
+    def _apply_order(self, rows: np.ndarray, generation: int) -> None:
+        if generation != self._generation:
+            return
+        self.layoutAboutToBeChanged.emit()
+        old = self.persistentIndexList()
+        inverse = np.empty(len(rows), dtype=np.intp)
+        inverse[rows] = np.arange(len(rows))
+        new = [self.index(int(inverse[self._order[i.row()]]), i.column()) for i in old]
+        self._order = rows
+        self.changePersistentIndexList(old, new)
+        self.layoutChanged.emit()
 
     def set_row_colour(self, row: int, colour: QColor) -> None:
         self._row_colours[row] = colour
@@ -97,7 +152,8 @@ class DataFrameModel(QAbstractTableModel):
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
-        value = self._columns[index.column()][index.row()]
+        row = int(self._order[index.row()])
+        value = self._columns[index.column()][row]
         if role == Qt.ItemDataRole.DisplayRole:
             return format_value(value)
         if role == Qt.ItemDataRole.UserRole:  # sort key
@@ -110,8 +166,8 @@ class DataFrameModel(QAbstractTableModel):
         numeric = isinstance(value, (int, float, np.integer, np.floating))
         if role == Qt.ItemDataRole.TextAlignmentRole and numeric:
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        if role == Qt.ItemDataRole.BackgroundRole and index.row() in self._row_colours:
-            return self._row_colours[index.row()]
+        if role == Qt.ItemDataRole.BackgroundRole and row in self._row_colours:
+            return self._row_colours[row]
         return None
 
     def headerData(
@@ -133,7 +189,7 @@ class DataFrameModel(QAbstractTableModel):
         if orientation == Qt.Orientation.Horizontal:
             name = str(self._frame.columns[section])
             return self._headers.get(name, name)
-        return format_value(self._frame.index[section])
+        return format_value(self._frame.index[self._order[section]])
 
 
 class ColumnFiller(QObject):
@@ -220,17 +276,12 @@ class DataTableView(QTableView):
     def __init__(self, parent: QWidget | None = None, *, sortable: bool = True) -> None:
         super().__init__(parent)
         self.model_ = DataFrameModel(parent=self)
+        self.setModel(self.model_)
         if sortable:
-            proxy = QSortFilterProxyModel(self)
-            proxy.setSourceModel(self.model_)
-            proxy.setSortRole(Qt.ItemDataRole.UserRole)
-            self.setModel(proxy)
             # No initial sort: rows keep the order of the frame (e.g. a ranking) until the
             # user clicks a column header.
             self.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
             self.setSortingEnabled(True)
-        else:
-            self.setModel(self.model_)
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
