@@ -17,6 +17,17 @@ production release is `v1.0.0`.
   at the column width cap instead of stretching its column.
 - Clicking a variable name toggles its checkbox in EDA, cleaning, predictor selection and
   cleaning dialogs. Checkbox clicks and keyboard selection remain available.
+- **What-if** is now a live trend. A clock runs (the trend scrolls past in about 30 s) from
+  steady state, and moving a slider changes that input *now*: the prediction plays out through
+  the model's features as it would online, with its steady state and where it is heading. Pause
+  and Reset replace the step time and run length. `core/what_if.py` gains `respond()` for any
+  schedule of input changes; `simulate()` keeps the one-step test.
+
+### Fixed
+- What-if with a standard-deviation feature: the steady state, final change, first response and
+  time to 95 % assumed the feature sat at its training mean. At steady state it is 0, so the
+  baseline was off, the response appeared to start before the step and never "settled". Both
+  are now read off the simulation itself.
 
 ### Fixed
 - **Hampel spike filter** now follows Hampel's definition: the MAD is taken about the window's

@@ -236,14 +236,15 @@ date until you train again.
   times, residuals against time, prediction and any predictor, residual histogram and
   autocorrelation, and **Applicability** — the training range of every predictor and how many
   later samples fall outside it.
-- **What-if** is a step test on the chosen model, like bumping an input on a simulator at
-  steady state. Every input starts at its training mean; at *Step at* the inputs you set with
-  their sliders (up to ± their training range, largest effect first) change and stay there.
-  The inputs pass through the model's own features, so the prediction responds as the soft
-  sensor would online: flat during the deadtime, then a ramp over the averaging window (an EWMA
-  filter adds a lag), settling at coefficient × step. The panel gives the final change of Y,
-  when the prediction first moves and when it reaches 95 % of the change, and warns when a step
-  leaves the training range. The response shape comes from the feature design (deadtime,
+- **What-if** runs the chosen model live, like bumping an input on a simulator at steady state.
+  A clock runs (sped up: the trend scrolls past in about 30 s) with every input at its training
+  mean; move a slider (up to ± the training range, largest effect first) and that input changes
+  *now* and stays there. The inputs pass through the model's own features, so the prediction
+  responds as the soft sensor would online: flat during the deadtime, then a ramp over the
+  averaging window (an EWMA filter adds a lag), settling at coefficient × change. The panel
+  gives the current prediction, the steady state and where it is settling, and warns when an
+  input leaves the training range. **Pause** freezes the clock; **Reset** returns every input
+  to steady state. The response shape comes from the feature design (deadtime,
   window, filter), not from the real process dynamics; in the plant, correlated inputs usually
   move together. On short screens only the prediction chart is shown.
 - Prefer a model that is accurate *and* simple, stable and physically sensible. Good fit
