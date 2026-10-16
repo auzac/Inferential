@@ -40,6 +40,7 @@ from inferential_studio.core.what_if import (
     steady_state,
     step_model,
 )
+from inferential_studio.infrastructure.workers import TaskManager
 from inferential_studio.ui.theme import TOKENS
 from inferential_studio.ui.widgets.plots import (
     BLUE,
@@ -47,6 +48,7 @@ from inferential_studio.ui.widgets.plots import (
     SERIES,
     legend,
     plot_widget,
+    show_placeholder,
 )
 
 STEPS = 1000  # slider resolution (0 … STEPS = −span … +span)
@@ -54,6 +56,17 @@ PANEL_WIDTH = 340
 TICK_MS = 50  # clock tick: the trend scrolls smoothly; new points come once per grid step
 SCROLL_S = 30.0  # real seconds for the clock to cross the whole trend
 COMPACT_HEIGHT = 320  # below this the inputs chart hides; the prediction gets the room
+DISPLAY_POINTS = 2000  # display sampling is independent of the feature calculation grid
+
+
+def _response_task(model, schedule, times, dt, baseline, target, *, progress=None, cancel=None):
+    if baseline is None:
+        baseline = steady_state(model, {}, dt, cancel=cancel)
+    if target is None:
+        target = (baseline if not schedule[-1][1]
+                  else steady_state(model, schedule[-1][1], dt, cancel=cancel))
+    values = respond(model, schedule, times, dt, cancel=cancel) if times.size else np.empty(0)
+    return times, values, baseline, target
 
 
 def _fmt(value: float, units: str | None = None, *, signed: bool = False) -> str:
@@ -144,6 +157,7 @@ class WhatIfView(QWidget):
 
     def __init__(self, empty_text: str = "", parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._empty_text = empty_text
         self._model: StepModel | None = None
         self._controls: list[_InputControl] = []
         self._target_units: str | None = None
@@ -154,6 +168,12 @@ class WhatIfView(QWidget):
         self._t = np.empty(0)  # trend times (s) and predictions
         self._y = np.empty(0)
         self._baseline = self._target = float("nan")
+        self._tasks = TaskManager(self, max_threads=1)
+        self._pending = None
+        self._generation = 0
+        self._initializing = False
+        self._target_dirty = False
+        self._display_dt = self._dt
         self._timer = QTimer(self, interval=TICK_MS)
         self._timer.timeout.connect(self._tick)
 
@@ -246,11 +266,13 @@ class WhatIfView(QWidget):
         self._target_units = (units or {}).get(new.target) if new else None
         self._rebuild_controls(keep)
         if new is None:
+            self._generation += 1
+            self._tasks.cancel_all()
             self._timer.stop()
             self._enable(False)
             self.summary.setText("")
             for chart in (self.inputs_chart, self.output_chart):
-                chart.clear()
+                show_placeholder(chart, self._empty_text)
             return
         self._dt = grid_step(new)
         self._view = default_timing(new)[1]
@@ -267,15 +289,20 @@ class WhatIfView(QWidget):
         return {c.inp.name: c.step() for c in self._controls if c.step()}
 
     def apply_theme(self) -> None:
-        self._draw()
+        if self.isVisible():
+            self._draw()
 
     def showEvent(self, event) -> None:  # noqa: ANN001, N802 - Qt override
         super().showEvent(event)
+        self._request_response()
+        self._draw()
         self._pause(self.pause_button.isChecked())
 
     def hideEvent(self, event) -> None:  # noqa: ANN001, N802 - Qt override
         super().hideEvent(event)
         self._timer.stop()  # no clock while nobody watches
+        self._generation += 1
+        self._tasks.cancel_all()
 
     def resizeEvent(self, event) -> None:  # noqa: ANN001, N802 - Qt override
         super().resizeEvent(event)
@@ -315,14 +342,20 @@ class WhatIfView(QWidget):
 
     def _restart(self, steps: dict[str, float]) -> None:
         """Clock to 0, settled at ``steps`` (a trend's worth of steady history on screen)."""
-        model = self._model
         self._clock = 0.0
+        self._generation += 1
+        self._tasks.cancel_all()
         self._schedule = [(-np.inf, steps)]
-        self._t = np.arange(-self._view, self._dt / 2, self._dt)
-        self._y = respond(model, self._schedule, self._t, self._dt)
-        self._baseline = steady_state(model, {}, self._dt)
-        self._target = steady_state(model, steps, self._dt)
-        self._draw()
+        self._display_dt = max(self._dt, np.ceil(self._view / DISPLAY_POINTS / self._dt) * self._dt)
+        self._t = np.empty(0)
+        self._y = np.empty(0)
+        self._baseline = self._target = float("nan")
+        self._initializing = True
+        self._target_dirty = True
+        self.summary.setText("Preparing live trend…")
+        for chart in (self.inputs_chart, self.output_chart):
+            show_placeholder(chart, "Preparing live trend…")
+        self._request_response()
         self._pause(self.pause_button.isChecked())
 
     def _moved(self) -> None:
@@ -330,30 +363,80 @@ class WhatIfView(QWidget):
         if self._model is None:
             return
         steps = self.steps()
-        at = self._t[-1] + self._dt
+        at = (np.floor(self._clock / self._dt) + 1) * self._dt
         if self._schedule[-1][0] == at:  # still dragging within one grid step
             self._schedule[-1] = (at, steps)
         else:
             # shortcut: the schedule keeps every change (≤ one per grid step while dragging);
             # trim entries older than the trend's lookback if sessions ever run for hours.
             self._schedule.append((at, steps))
-        self._target = steady_state(self._model, steps, self._dt)
-        self._draw()
+        self._generation += 1
+        self._tasks.cancel_all()
+        self._target_dirty = True
+        self.summary.setText("Updating live trend…")
+        self._request_response()
 
     def _tick(self) -> None:
+        if self._initializing:
+            return
         self._clock += self._view / SCROLL_S * TICK_MS / 1000.0
-        new = np.arange(self._t[-1] + self._dt, self._clock + self._dt / 2, self._dt)
-        if new.size:
-            y = respond(self._model, self._schedule, new, self._dt)
-            keep = self._t > self._clock - self._view - self._dt
-            self._t = np.concatenate([self._t[keep], new])
-            self._y = np.concatenate([self._y[keep], y])
-            self._draw()
+        self._request_response()
         self.output_chart.setXRange((self._clock - self._view) / 60, self._clock / 60, padding=0)
+
+    def _request_response(self) -> None:
+        if self._model is None or not self.isVisible() or self._pending is not None:
+            return
+        initial = self._initializing
+        start = (0 if initial else max(
+            self._t[-1] + self._display_dt,
+            np.ceil((self._clock - self._view) / self._display_dt) * self._display_dt,
+        ))
+        times = (np.arange(-self._view, self._display_dt / 2, self._display_dt) if initial else
+                 np.arange(start, self._clock + self._display_dt / 2, self._display_dt))
+        if not times.size and not self._target_dirty:
+            return
+        generation = self._generation
+        self._pending = self._tasks.submit(
+            "Calculating live trend", _response_task,
+            self._model, [(t, dict(s)) for t, s in self._schedule], times, self._dt,
+            None if initial else self._baseline, None if self._target_dirty else self._target,
+            on_result=lambda result: self._response_ready(result, generation, initial),
+            on_error=lambda message, _details: self._response_failed(message, generation),
+            on_cancelled=self._response_cancelled,
+        )
+
+    def _response_ready(self, result, generation: int, initial: bool) -> None:
+        self._pending = None
+        if generation != self._generation:
+            self._request_response()
+            return
+        times, values, self._baseline, self._target = result
+        if initial:
+            self._t, self._y = times, values
+        else:
+            keep = self._t > self._clock - self._view - self._display_dt
+            self._t = np.concatenate([self._t[keep], times])
+            self._y = np.concatenate([self._y[keep], values])
+        self._initializing = self._target_dirty = False
+        if self.isVisible():
+            self._draw()
+
+    def _response_cancelled(self) -> None:
+        self._pending = None
+        self._request_response()
+
+    def _response_failed(self, message: str, generation: int) -> None:
+        self._pending = None
+        if generation != self._generation:
+            self._request_response()
+            return
+        self._timer.stop()
+        self.pause_button.setChecked(True)
+        self.summary.setText(f"Could not calculate the live trend: {escape(message)}")
 
     def _draw(self) -> None:
         model = self._model
-        if model is None:
+        if model is None or not self._t.size:
             return
         t = self._t / 60.0
         values = input_values(model, self._schedule, self._t)
@@ -401,6 +484,11 @@ class WhatIfView(QWidget):
             if steps.get(i.name) and not i.low <= i.baseline + steps[i.name] <= i.high
         ]
         warn.extend(notes(self._model))
+        if self._display_dt > self._dt:
+            warn.append(
+                f"Long trend: points are shown every {_minutes(self._display_dt)} min; "
+                "shorter transients may fall between plotted points."
+            )
         if not np.isfinite(self._y).all():
             warn.append("Gaps in the line: a feature failed its coverage checks.")
         colour = TOKENS["warning"]
