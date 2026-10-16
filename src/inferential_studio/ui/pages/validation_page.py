@@ -8,12 +8,15 @@ import pyqtgraph as pg
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
-    QSplitter,
+    QScrollArea,
+    QSizePolicy,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -71,6 +74,7 @@ class ValidationPage(StagePage):
     ) -> None:
         super().__init__(stage, parent)
         self._session = session
+        self._compact: bool | None = None
 
         self.comparison = DataTableView()
         self.comparison.fit_to_rows(max_rows=6)  # one row per model, no empty band
@@ -80,6 +84,7 @@ class ValidationPage(StagePage):
         self.candidate_tabs = QTabWidget()
         self.candidate_tabs.addTab(self.recommended, "Best by input count")
         self.candidate_tabs.addTab(self.comparison, "All candidates")
+        self.candidate_tabs.currentChanged.connect(self._fit_comparison)
         self.comparison_note = note_label()
         self.reveal_button = QPushButton("Show final test results…")
         self.reveal_button.clicked.connect(self.ask_reveal)
@@ -101,7 +106,7 @@ class ValidationPage(StagePage):
         tl.addLayout(row)
         tl.addWidget(self.candidate_tabs)
         tl.addWidget(self.comparison_note)
-        tl.addStretch(1)
+        self.comparison_panel = top
 
         self.tabs = QTabWidget()
         tz = session.project.display_timezone
@@ -161,18 +166,48 @@ class ValidationPage(StagePage):
         bl.addWidget(self.metrics)
         bl.addWidget(self.tabs, 1)
         bl.addWidget(self.plot_note)
-        # The comparison keeps its natural height (its table fits its rows); the diagnostics
-        # below take the rest of the page.
-        split = QSplitter(Qt.Orientation.Vertical)
-        split.addWidget(top)
-        split.addWidget(bottom)
-        split.setStretchFactor(0, 0)
-        split.setStretchFactor(1, 1)
-        split.setChildrenCollapsible(False)
-        self.body.addWidget(split, 1)
+        self.tabs.setMinimumHeight(260)
+        self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        self.comparison_toggle = QToolButton()
+        self.comparison_toggle.setText("Model comparison and metrics")
+        self.comparison_toggle.setCheckable(True)
+        self.comparison_toggle.setChecked(True)
+        self.comparison_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.comparison_toggle.toggled.connect(self._show_comparison)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.addWidget(top)
+        content_layout.addWidget(bottom, 1)
+        self.content_scroll = QScrollArea()
+        self.content_scroll.setWidgetResizable(True)
+        self.content_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.content_scroll.setWidget(content)
+        self.body.addWidget(self.comparison_toggle)
+        self.body.addWidget(self.content_scroll, 1)
+        self._show_comparison(True)
 
         session.training_changed.connect(self.refresh)
         self.refresh()
+
+    def _show_comparison(self, shown: bool) -> None:
+        self.comparison_panel.setVisible(shown)
+        self.metrics.setVisible(shown)
+        self.comparison_toggle.setArrowType(Qt.ArrowType.DownArrow if shown else Qt.ArrowType.RightArrow)
+
+    def _fit_comparison(self, *_args: object) -> None:
+        table = self.candidate_tabs.currentWidget()
+        self.candidate_tabs.setFixedHeight(
+            table.minimumHeight() + self.candidate_tabs.tabBar().sizeHint().height() + 6
+        )
+
+    def resizeEvent(self, event) -> None:  # noqa: ANN001, N802 - Qt override
+        super().resizeEvent(event)
+        compact = self.height() < 600
+        if compact != self._compact:
+            self._compact = compact
+            self.comparison_toggle.setChecked(not compact)
+        self._fit_comparison()
 
     # ------------------------------------------------------------------ state
 
@@ -232,6 +267,7 @@ class ValidationPage(StagePage):
         index = self.model_combo.findData(selected)
         self.model_combo.setCurrentIndex(max(index, 0))
         self.model_combo.blockSignals(False)
+        self._fit_comparison()
         ranked = ("training-period CV RMSE" if run.search_subsets else
                   "validation RMSE" if run.ranking_split() == VALIDATION else "cross-validation RMSE")
         units = next(

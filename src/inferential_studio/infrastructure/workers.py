@@ -61,7 +61,8 @@ class _TaskSignals(QObject):
 
 class _Runnable(QRunnable):
     def __init__(
-        self, task_id: int, fn: Callable[..., Any], args: tuple, kwargs: dict, token: CancelToken
+        self, task_id: int, fn: Callable[..., Any], args: tuple, kwargs: dict, token: CancelToken,
+        discard_cancelled_result: bool = True,
     ):
         super().__init__()
         self.setAutoDelete(False)  # the manager owns the lifetime
@@ -70,6 +71,7 @@ class _Runnable(QRunnable):
         self.args = args
         self.kwargs = kwargs
         self.token = token
+        self.discard_cancelled_result = discard_cancelled_result
         self.signals = _TaskSignals()
         self._last_progress = 0.0
 
@@ -89,7 +91,7 @@ class _Runnable(QRunnable):
             log.exception("Background task %s failed", self.task_id)
             self.signals.failed.emit(self.task_id, friendly_message(exc), traceback.format_exc())
         else:
-            if self.token.cancelled:
+            if self.token.cancelled and self.discard_cancelled_result:
                 self.signals.cancelled.emit(self.task_id)
             else:
                 self.signals.succeeded.emit(self.task_id, result)
@@ -139,12 +141,18 @@ class TaskManager(QObject):
         on_result: Callable[[Any], None] | None = None,
         on_error: Callable[[str, str], None] | None = None,
         on_cancelled: Callable[[], None] | None = None,
+        discard_cancelled_result: bool = True,
         **kwargs: Any,
     ) -> TaskHandle:
+        """Atomic writers can keep a committed result despite a late cancellation request.
+
+        With discard_cancelled_result=False the function must check cancellation itself,
+        and raise TaskCancelled before committing. A successful return means it committed.
+        """
         task_id = next(self._ids)
         token = CancelToken()
         handle = TaskHandle(task_id, name, token, on_result, on_error, on_cancelled)
-        runnable = _Runnable(task_id, fn, args, kwargs, token)
+        runnable = _Runnable(task_id, fn, args, kwargs, token, discard_cancelled_result)
         runnable.signals.progress.connect(self._on_progress)
         runnable.signals.succeeded.connect(self._on_succeeded)
         runnable.signals.failed.connect(self._on_failed)

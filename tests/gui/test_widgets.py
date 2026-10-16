@@ -419,6 +419,25 @@ def test_table_columns_fill_a_wide_view(qtbot):
     assert table.model_.headerData(1, horizontal, role) & int(Qt.AlignmentFlag.AlignRight)
 
 
+def test_stacked_trends_scroll_with_readable_axes_on_short_screens(qtbot):
+    from inferential_studio.ui.widgets.trend_view import MIN_PLOT_HEIGHT
+
+    view = TrendView("UTC")
+    qtbot.addWidget(view)
+    x = to_epoch_seconds(pd.date_range("2026-01-01", periods=100, freq="1min", tz="UTC"))
+    view.set_series([TrendSeries(f"Tag {i}", x, np.arange(100.0)) for i in range(5)])
+    view.resize(650, 180)
+    view.show()
+    qtbot.wait(50)
+    assert view.canvas.height() >= 5 * MIN_PLOT_HEIGHT
+    assert view.chart_scroll.verticalScrollBar().maximum() > 0
+    assert all(p.height() >= 100 for p in view.plots)
+    assert all(p.getAxis("bottom").style["showValues"] for p in view.plots)
+    view.chart_scroll.verticalScrollBar().setValue(view.chart_scroll.verticalScrollBar().maximum())
+    qtbot.wait(10)
+    assert view.plots[-1].height() >= 100  # the last signal is reachable, not squeezed out
+
+
 def test_flow_row_reserves_its_wrapped_height(qtbot):
     from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
 

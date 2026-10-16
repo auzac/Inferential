@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -41,7 +42,6 @@ from inferential_studio.core.artifacts import (
 )
 from inferential_studio.core.exclusions import category_table
 from inferential_studio.core.exports import (
-    ExportError,
     batch_prediction_table,
     feature_matrix_table,
     predictions_table,
@@ -49,6 +49,7 @@ from inferential_studio.core.exports import (
 )
 from inferential_studio.core.report import build_report
 from inferential_studio.core.schemas import ReportInfo
+from inferential_studio.core.tasks import check, report
 from inferential_studio.infrastructure.settings import AppSettings
 from inferential_studio.infrastructure.workers import TaskManager
 from inferential_studio.ui.commands import edit_lists
@@ -79,6 +80,14 @@ def _predict_task(artifact, process, times, excluded, regime, units, **kw):  # n
     return predict(artifact, process, times, excluded=excluded, regime=regime, units=units, **kw)
 
 
+def _export_task(build_table, path, sheet, notes, *, progress=None, cancel=None):
+    check(cancel)
+    report(progress, 0, "Preparing table…")
+    table = build_table()
+    check(cancel)
+    return write_table(table, path, sheet=sheet, notes=notes, progress=progress, cancel=cancel)
+
+
 class ExportPage(StagePage):
     def __init__(
         self,
@@ -98,6 +107,7 @@ class ExportPage(StagePage):
         self._loaded_path: Path | None = None
         self._prediction: Prediction | None = None
         self.last_written: Path | None = None  # for tests and the status bar
+        self._exporting = False
 
         # -- the trained model -----------------------------------------------------------
         self.model_combo = QComboBox()
@@ -272,6 +282,7 @@ class ExportPage(StagePage):
         self._sync_test_checkbox()
         self._update_equation()
         self._update_apply_state()
+        self._export_buttons()
 
     @Slot()
     def _sync_test_checkbox(self, *_args: object) -> None:
@@ -358,6 +369,41 @@ class ExportPage(StagePage):
         if hasattr(window, "show_error"):
             window.show_error(title, message)
 
+    def _export_buttons(self) -> None:
+        self.btn_predictions.setEnabled(self._run_ok() and not self._exporting)
+        self.btn_features.setEnabled(self._session.features is not None and not self._exporting)
+        self.btn_export_applied.setEnabled(self._prediction is not None and not self._exporting)
+
+    def _queue_export(self, build_table, path: Path, sheet: str, notes: list[str]) -> Path | None:
+        """Return the queued destination; last_written changes only after a successful write."""
+        if self._exporting:
+            return None
+        self._exporting = True
+        self._export_buttons()
+        self._tasks.submit(
+            f"Exporting {path.name}", _export_task, build_table, path, sheet, list(notes),
+            on_result=self._export_done,
+            on_error=self._export_failed,
+            on_cancelled=self._export_cancelled,
+            discard_cancelled_result=False,
+        )
+        return path
+
+    def _export_done(self, path: Path) -> None:
+        self._exporting = False
+        self._export_buttons()
+        self._done(path)
+
+    def _export_failed(self, message: str, _details: str) -> None:
+        self._exporting = False
+        self._export_buttons()
+        self._fail("Cannot export", message)
+
+    def _export_cancelled(self) -> None:
+        self._exporting = False
+        self._export_buttons()
+        self._session.messages.info("Export cancelled; destination was not replaced.", "export")
+
     # ------------------------------------------------------------------ exports
 
     def save_report(self, path: Path | None = None) -> Path | None:
@@ -394,20 +440,19 @@ class ExportPage(StagePage):
         if path is None:
             return None
         s = self._session
-        try:
-            table = predictions_table(
-                s.training, self.model_combo.currentText(), s.features,
-                timezone=s.project.display_timezone, include_test=self.include_test.isChecked(),
-            )  # fmt: skip
-            notes = [f"Model: {self.model_combo.currentText()}", "Residual = actual - predicted."]
-            if not self.include_test.isChecked():
-                notes.append("Final-test rows are not included (not revealed / not selected).")
-            write_table(table, path, sheet="Predictions", notes=notes)
-        except ExportError as exc:
-            self._fail("Cannot export predictions", str(exc))
-            return None
-        self._done(path)
-        return path
+        # Training runs are replaced by edits; reveal_test can replace predictions in place.
+        # Capture that table now, without copying fitted estimators or large feature arrays.
+        run = replace(s.training, models=[replace(m, predictions=m.predictions.copy(deep=False))
+                      if m.predictions is not None else replace(m) for m in s.training.models])
+        name, fm = self.model_combo.currentText(), s.features
+        timezone, include_test = s.project.display_timezone, self.include_test.isChecked()
+        notes = [f"Model: {name}", "Residual = actual - predicted."]
+        if not include_test:
+            notes.append("Final-test rows are not included (not revealed / not selected).")
+        return self._queue_export(
+            lambda: predictions_table(run, name, fm, timezone=timezone, include_test=include_test),
+            path, "Predictions", notes,
+        )
 
     def export_features(self, path: Path | None = None) -> Path | None:
         fm = self._session.features
@@ -416,14 +461,11 @@ class ExportPage(StagePage):
         path = path or self._ask_path("Export feature matrix", "feature matrix.xlsx", TABLE_FILTER)
         if path is None:
             return None
-        try:
-            write_table(feature_matrix_table(fm, self._session.project.display_timezone), path,
-                        sheet="Features", notes=[f.replace("\n", " ") for f in fm.notes])  # fmt: skip
-        except ExportError as exc:
-            self._fail("Cannot export the feature matrix", str(exc))
-            return None
-        self._done(path)
-        return path
+        timezone = self._session.project.display_timezone
+        return self._queue_export(
+            lambda: feature_matrix_table(fm, timezone), path, "Features",
+            [f.replace("\n", " ") for f in fm.notes],
+        )
 
     def save_model(self, path: Path | None = None) -> Path | None:
         if not self._run_ok():
@@ -530,7 +572,7 @@ class ExportPage(StagePage):
     def _applied(self, pred: Prediction) -> None:
         self._prediction = pred
         self._update_apply_state()
-        self.btn_export_applied.setEnabled(True)
+        self._export_buttons()
         clear_placeholder(self.apply_plot)
         t = pred.table
         x = to_epoch_seconds(pd.DatetimeIndex(t["time"]))
@@ -586,16 +628,12 @@ class ExportPage(StagePage):
         )
         if path is None:
             return None
-        try:
-            table = batch_prediction_table(
-                self._prediction.table, self._session.project.display_timezone
-            )
-            write_table(table, path, sheet="Predictions", notes=self._prediction.warnings)
-        except ExportError as exc:
-            self._fail("Cannot export", str(exc))
-            return None
-        self._done(path)
-        return path
+        table = self._prediction.table.copy(deep=False)
+        timezone = self._session.project.display_timezone
+        return self._queue_export(
+            lambda: batch_prediction_table(table, timezone), path, "Predictions",
+            self._prediction.warnings,
+        )
 
     def showEvent(self, event) -> None:  # noqa: N802, ANN001
         super().showEvent(event)
