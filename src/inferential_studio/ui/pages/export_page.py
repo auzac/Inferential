@@ -352,6 +352,7 @@ class ExportPage(StagePage):
         self.last_written = path
         self._settings.last_directory = str(path.parent)
         self._session.messages.info(f"Saved {path}", "export")
+        self._session.mark_progress("export")
 
     def _fail(self, title: str, message: str) -> None:
         window = self.window()

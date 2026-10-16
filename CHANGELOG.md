@@ -36,6 +36,11 @@ production release is `v1.0.0`.
   (With the default tolerance 0 nothing changes.)
 
 ### Added
+- **Workflow progress bar** in every page header: one segment per stage — done, started but
+  unfinished, or not started — with the current stage drawn taller and "N of 9 done" above it.
+  Hover a segment for what the stage still needs; click to go there. Progress is saved with the
+  project (schema version 7; older projects start with review stages unvisited), so a reopened
+  project shows where you left off.
 - Optional input-subset model search for up to five selected predictors. Candidates use the same
   eligible rows, chronological split and training-period CV folds; the leaderboard ranks by CV
   RMSE and shows the best candidate at each input count. Validation results remain visible for

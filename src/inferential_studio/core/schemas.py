@@ -28,10 +28,10 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SCHEMA_VERSION = 6  # 1 = M0; 2 = native timestamps, duplicate policy, sample ids;
+SCHEMA_VERSION = 7  # 1 = M0; 2 = native timestamps, duplicate policy, sample ids;
 # 3 = rules, detectors, flag reviews; 4 = alignment options, splits and model configurations;
 # 5 = optional embedded data (portable projects), saved training results, report details;
-# 6 = optional predictor-subset model search
+# 6 = optional predictor-subset model search; 7 = workflow progress
 
 
 class SchemaError(ValueError):
@@ -821,6 +821,7 @@ class Project:
     modelling: ModellingConfig = field(default_factory=ModellingConfig)
     report: ReportInfo = field(default_factory=ReportInfo)
     notes: str = ""
+    progress: list[str] = field(default_factory=list)  # workflow stages visited (keys); export done
     created_at: datetime = field(default_factory=utc_now)
     modified_at: datetime = field(default_factory=utc_now)
 

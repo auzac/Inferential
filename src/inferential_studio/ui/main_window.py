@@ -78,7 +78,7 @@ from inferential_studio.ui.pages.variables_page import VariablesPage
 from inferential_studio.ui.project_dialog import ProjectSettingsDialog
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.settings_dialog import SettingsDialog
-from inferential_studio.ui.stages import STAGES
+from inferential_studio.ui.stages import STAGES, stage_states
 from inferential_studio.ui.theme import (
     DARK,
     LIGHT,
@@ -442,7 +442,16 @@ class MainWindow(QMainWindow):
         self.sidebar.currentRowChanged.connect(
             lambda row: self.message_panel.set_stage(STAGES[row].key) if row >= 0 else None
         )
+        self.sidebar.currentRowChanged.connect(self._stage_visited)
+        s = self.session
+        for signal in (s.changed, s.data_changed, s.cleaning_changed, s.inputs_changed,
+                       s.modelling_changed, s.features_changed, s.training_changed,
+                       s.progress_changed):  # fmt: skip
+            signal.connect(self._update_progress)
+        for page in self.pages.values():
+            page.progress.stage_clicked.connect(self.sidebar.setCurrentRow)
         self.sidebar.setCurrentRow(0)
+        self._update_progress()
         self.help_panel.show_stage(STAGES[0].key)
         self.message_panel.set_stage(STAGES[0].key)
         self.help_close.setIcon(icon("dismiss", size=16))
@@ -770,6 +779,16 @@ class MainWindow(QMainWindow):
         if self._reproduce_pending and self.session.features is not None:
             self._reproduce_pending = False
             self.run_training(reproduce=True)
+
+    def _stage_visited(self, row: int) -> None:
+        # Export counts once something is exported (the page records it), not on a visit.
+        if row >= 0 and STAGES[row].key != "export":
+            self.session.mark_progress(STAGES[row].key)
+
+    def _update_progress(self) -> None:
+        states = stage_states(self.session)
+        for page in self.pages.values():
+            page.set_progress(states)
 
     def _stage_row(self, key: str) -> int:
         return [s.key for s in STAGES].index(key)

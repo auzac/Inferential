@@ -85,7 +85,7 @@ Listed in workflow order.
 |---|---|
 | `main_window.py` | Actions, title bar and main menu, stage rail, page stack, Help panel, status bar, theme switching, frameless frame; open/save/import, detection, training, recovery. **Start here to follow any user action.** |
 | `session.py` | The open project + loaded data + derived state (cleaning masks, aligned features, training run); background recomputation and signals that pages listen to. |
-| `stages.py` | The nine workflow stages (titles, goals, rail icons), in workflow order. |
+| `stages.py` | The nine workflow stages (titles, goals, rail icons), in workflow order; `stage_states()` = how far along each is (progress bar). |
 | `commands.py` | Undo/redo: edits replace whole project lists/configs. |
 | `messages.py` | `MessageCenter` (on `session.messages`): every status line, warning and error. Pages call `messages.set(key, level, text)` for a state and `messages.info/warning/error(...)` for an event — never a label in the page. |
 | `help.py` | Per-stage help text (Help panel) and the in-app document viewer (F1). |
@@ -110,7 +110,8 @@ Listed in workflow order.
 | 8 Validation | `validation_page.py` |
 | 9 Export & Report | `export_page.py` |
 
-`ui/widgets/` — reusable pieces: `title_bar.py` (title bar = ≡ menu, command icons, project
+`ui/widgets/` — reusable pieces: `stage_progress.py` (workflow progress bar in every page
+header), `title_bar.py` (title bar = ≡ menu, command icons, project
 name, Help panel toggle, `theme_switch.py`, caption buttons), `nav_rail.py` (stage rail that
 slides out over the page), `window_frame.py` (resize grips and Windows 11 corners for the
 frameless window), `message_panel.py` (fixed message log at the bottom),

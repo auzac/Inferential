@@ -187,6 +187,7 @@ QFrame#pageHeader {{ background: transparent; border: none; border-bottom: 1px s
 QLabel#pageEyebrow {{ color: {t["accent"]}; font-size: 8.5pt; font-weight: 600; }}
 QLabel#pageTitle {{ font-size: 14pt; font-weight: 600; color: {t["text"]}; }}
 QLabel#pageGoal {{ color: {t["text_muted"]}; }}
+QLabel#pageProgress {{ color: {t["text_faint"]}; font-size: 8.5pt; }}
 QLabel#placeholderNote {{ color: {t["text_muted"]}; font-size: 8.5pt; }}
 QLabel#sectionTitle {{ color: {t["text_muted"]}; font-weight: 600; }}
 

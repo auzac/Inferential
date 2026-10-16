@@ -52,6 +52,13 @@ def test_roundtrip(tmp_path, project):
     assert saved.modified_at >= project.modified_at
 
 
+def test_workflow_progress_is_saved_and_old_projects_start_without_it(tmp_path, project):
+    path = tmp_path / "p.imsproj"
+    save_project(replace(project, progress=["initial_eda", "export"]), path)
+    assert load_project(path).progress == ["initial_eda", "export"]
+    assert persistence.migrate({"name": "old"}, SCHEMA_VERSION - 1) == {"name": "old"}
+
+
 def test_save_leaves_no_temp_files_and_records_versions(tmp_path, project):
     path = tmp_path / "p.imsproj"
     save_project(project, path)

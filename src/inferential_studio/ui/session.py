@@ -78,6 +78,7 @@ class ProjectSession(QObject):
     features_changed = Signal()  # aligned feature matrix recomputed (or failed: see features_error)
     FEATURE_STAGES = ("variables", "processing", "model_setup")
     training_changed = Signal()  # a training run finished or was invalidated
+    progress_changed = Signal()  # a stage was visited or an export written
 
     # Project attributes that undoable edits replace wholesale.
     CLEANING_LISTS = ("exclusions", "rules", "detectors", "flag_decisions")
@@ -205,6 +206,13 @@ class ProjectSession(QObject):
         self.path_changed.emit(target)
         self._set_dirty(False)
         return target
+
+    def mark_progress(self, key: str) -> None:
+        """Record a visited stage (or ``"export"`` once something is exported). Saved with the
+        project but does not mark it unsaved: moving between pages is not an edit."""
+        if key not in self._project.progress:
+            self._project.progress.append(key)
+            self.progress_changed.emit()
 
     def mark_dirty(self) -> None:
         self._set_dirty(True)
