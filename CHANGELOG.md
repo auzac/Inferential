@@ -28,8 +28,6 @@ production release is `v1.0.0`.
   time to 95 % assumed the feature sat at its training mean. At steady state it is 0, so the
   baseline was off, the response appeared to start before the step and never "settled". Both
   are now read off the simulation itself.
-
-### Fixed
 - **Hampel spike filter** now follows Hampel's definition: the MAD is taken about the window's
   own median. It previously used each neighbour's own local median, which underestimated the
   spread and roughly tripled false flags on noisy signals (same spikes caught).
