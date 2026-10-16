@@ -27,7 +27,7 @@ from inferential_studio.core.statistics import histogram
 from inferential_studio.ui.pages.stage_page import StagePage
 from inferential_studio.ui.session import ProjectSession
 from inferential_studio.ui.stages import Stage
-from inferential_studio.ui.widgets.data_table import DataTableView
+from inferential_studio.ui.widgets.data_table import COLUMN_MAX, DataTableView
 from inferential_studio.ui.widgets.plots import (
     GREY,
     SPLIT_COLOURS,
@@ -77,6 +77,7 @@ class ValidationPage(StagePage):
         self._compact: bool | None = None
 
         self.comparison = DataTableView()
+        self.comparison.verticalHeader().setMaximumWidth(COLUMN_MAX)
         self.comparison.fit_to_rows(max_rows=6)  # one row per model, no empty band
         self.recommended = DataTableView()
         self.recommended.fit_to_rows(max_rows=5)
@@ -246,13 +247,23 @@ class ValidationPage(StagePage):
             self._show_model()
             return
         table = run.comparison(include_test=revealed)
-        self.comparison.set_frame(table, COMPARISON_HEADERS)
+        ranking_column = ("cv_rmse" if run.search_subsets or run.ranking_split() != VALIDATION
+                          else "validation_rmse")
+        first = [ranking_column, "input_count"]
+        table = table[first + [c for c in table if c not in first]]
+        headers = {**COMPARISON_HEADERS,
+                   ranking_column: COMPARISON_HEADERS[ranking_column] + " (ranking)"}
+        self.comparison.set_frame(table, headers)
         if run.search_subsets:
             good = table[table["status"] == "ok"].reset_index(names="model")
             if len(good):
                 best = good.sort_values("cv_rmse").groupby("input_count", sort=True).head(1)
                 best = best.sort_values("input_count")
-                self.recommended.set_frame(best[["model", "input_count", "predictors", "cv_rmse", "validation_rmse"]].reset_index(drop=True), RECOMMENDED_HEADERS)
+                self.recommended.set_frame(
+                    best[["model", "cv_rmse", "input_count", "predictors", "validation_rmse"]]
+                    .reset_index(drop=True),
+                    {**RECOMMENDED_HEADERS, "cv_rmse": "CV RMSE (ranking)"},
+                )
             else:
                 self.recommended.set_frame(pd.DataFrame())
             self.candidate_tabs.setTabEnabled(0, True)

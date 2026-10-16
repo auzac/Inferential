@@ -30,29 +30,59 @@ Scope agreed 17 October 2026. Audit baseline: `00b6703`; implementation starts a
 
 ## Milestone 4 — What-if calculation correctness (audit finding 4)
 
-**Excluded from this implementation. Claude is working on it.**
+**Reassessed: Claude's fix passes.** Reviewed `5f38dc8`, included in main through PR #18.
 
-- [ ] Reassess Claude's fix when available.
-- [ ] Verify standard-deviation features have the correct initial/final prediction and transient response.
-- [ ] Verify the displayed response/settling summary agrees with the simulation.
+- [x] Reassess Claude's fix when available.
+- [x] Verify standard-deviation features have the correct initial/final prediction and transient response.
+- [x] Verify the live UI's current/settling summary agrees with the simulation.
 
-This work changes layout containers around What-if but leaves its calculation and control files untouched.
+The original reproduction (intercept 1, coefficient 2, constant input 10, step +3,
+10-minute standard-deviation window) now starts and settles at **1**, with a genuine
+transient and **zero final change**. The old reported baseline 21 and final change +6
+are gone. The live UI no longer offers the old first-response/95% timing summary and
+omits the misleading coefficient-times-raw-step label for standard-deviation inputs.
+Added regression checks cover both numerical output and the displayed summary.
 
 ## Milestone 5 — Expensive and hidden simulations (audit finding 5)
 
-**Deferred for reassessment.**
+**Completed locally after reassessment.** Claude stopped the hidden clock and made theme
+changes redraw-only. Remaining initialization, slider and live calculations still ran
+on the GUI thread, and mixed short/long feature windows could create huge histories.
 
-- [ ] Reassess against Claude's updated What-if implementation.
-- [ ] Decide whether visible-tab computation, caching or background execution is still needed.
-- [ ] Recheck long-run slider, model-change and theme-switch responsiveness.
+- [x] Reassess against Claude's updated What-if implementation.
+- [x] Defer numerical initialization until the tab is visible; cancel obsolete hidden work.
+- [x] Run calculation in a single background worker; coalesce slider edits and reject stale results.
+- [x] Reuse steady-state results between live ticks and redraw cached values on theme changes.
+- [x] Bound the visible history to about 2,000 samples while preserving the feature calculation grid.
+- [x] Skip invisible catch-up history after a delayed worker; explain display sampling of long trends.
+- [x] Recheck long-run slider, model-change and theme-switch responsiveness.
+
+A model with 6-second and 7-day feature windows retains a **1-second calculation grid**,
+but initializes **1,999 display samples** in **1.03 s** in the background. Hidden model
+setup took 0.9 ms; slider dispatch took 0.13 ms and its result arrived in 147 ms. A 10 ms
+GUI timer fired 51 times during initialization; its largest measured gap was 0.43 s.
+These are macOS observations, not a Windows performance guarantee. Raw feature-history
+construction still uses memory and can cause some Python/GIL-related jitter. Long-trend
+sampling may miss short transients; the UI now explicitly says so.
+
+Tests verify no hidden numerical work, no theme-triggered recalculation, a live event
+loop during worker execution, coalescing to the latest slider values, cancellation,
+bounded history and correct standard-deviation summaries.
 
 ## Milestone 6 — Ranking metric visibility (audit finding 6)
 
-**Deferred for reassessment.**
+**Completed locally.**
 
-- [ ] Reassess comparison-column order after the compact-layout change.
-- [ ] Keep the active ranking metric visible without horizontal scrolling if still required.
-- [ ] Recheck ordinary comparisons and subset searches at both window sizes.
+- [x] Reassess comparison-column order after the compact-layout change.
+- [x] Put the active ranking metric first, immediately beside the model's row label.
+- [x] Label the active metric “ranking”.
+- [x] Bound long model row labels so they cannot push the metric out of view; keep full labels in tooltips.
+- [x] Put CV RMSE immediately after the candidate name in “Best by input count”.
+- [x] Preserve the existing ranking calculations, detailed columns and final-test gating.
+- [x] Verify ordinary comparisons, no-validation CV fallback and subset searches at 960×640 and 1440×900.
+
+The model-comparison section remains collapsible on short screens (milestone 3). When
+opened, the ranking metric is visible at the initial horizontal scroll position.
 
 ## Milestone 7 — Accessible control names (audit finding 7)
 
@@ -87,9 +117,17 @@ This work changes layout containers around What-if but leaves its calculation an
   **397 passes and one existing platform-specific shortcut assertion failure** (`Ctrl+S` vs `⌘S`).
   The additional atomic-commit worker behavior and export checks pass in an **18-test focused run**.
 
+## Follow-up verification for milestones 4–6
+
+- Reviewed against main `bea65ff`; no newer remote change was present at the start.
+- **410 tests passed, one deselected**, with the import-wizard file excluded for the known
+  macOS offscreen abort and the existing shortcut assertion deselected for its Ctrl/Command mismatch.
+- Lint passes. Normal/subset ranking and live-view layouts were rendered for visual review.
+- Milestones 7–8 remain deferred. No accessibility-name or palette changes are included.
+
 ### Remaining platform checks
 
-- [ ] Validate milestones 1–3 on Windows with the pinned release dependencies.
+- [ ] Validate milestones 1–6 on Windows with the pinned release dependencies.
 - [ ] Repeat layout checks at Windows 125–200% scaling.
 - [ ] Rerun the import-wizard GUI tests on a supported display; macOS offscreen aborted at wizard.show().
 - [ ] Reassess the existing shortcut assertion on macOS separately from these UI changes.

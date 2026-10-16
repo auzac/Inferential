@@ -124,3 +124,23 @@ def test_live_schedule_applies_each_change_from_its_time():
     t = np.arange(0.0, 600.0, 60.0)
     y = respond(m, [(120.0, {"x": 1.0}), (300.0, {"x": -1.0})], t, 60.0)
     np.testing.assert_allclose(y, 21.0 + 2.0 * np.array([0, 0, 1, 1, 1, -1, -1, -1, -1, -1]))
+
+
+def test_original_std_regression_has_a_transient_without_a_false_steady_change():
+    m = one_input(FeatureSpec("x", window_s=600, aggregation=Aggregation.STD))
+    res = simulate(m, {"x": 3.0}, 900, 3600, dt_s=60)
+    assert res.baseline == pytest.approx(1.0)
+    assert res.final_change == pytest.approx(0.0)
+    np.testing.assert_allclose(res.predicted[res.t_s < 900], 1.0)
+    assert res.predicted.max() > 1.0  # the step has a real transient inside the window
+    assert res.predicted[-1] == pytest.approx(1.0)
+    assert res.first_response_s is None and res.settled_s is None  # no final step to time
+
+
+def test_live_response_can_be_cancelled_before_building_features():
+    from inferential_studio.core.tasks import CancelToken, TaskCancelled
+
+    token = CancelToken()
+    token.cancel()
+    with pytest.raises(TaskCancelled):
+        respond(one_input(FeatureSpec("x")), [], np.array([0.0]), 60.0, cancel=token)
