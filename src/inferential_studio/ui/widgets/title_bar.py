@@ -134,7 +134,9 @@ class TitleBar(QWidget):
         self.max_button.setIcon(
             icon("square_multiple" if maximised else "maximize", size=CAPTION_ICON)
         )
-        self.max_button.setToolTip("Restore down" if maximised else "Maximise")
+        label = "Restore down" if maximised else "Maximise"
+        self.max_button.setToolTip(label)
+        self.max_button.setAccessibleName(label)
 
     def apply_theme(self) -> None:
         self.menu_button.setIcon(icon("navigation"))
@@ -196,7 +198,8 @@ class TitleBar(QWidget):
         button.setIconSize(QSize(CAPTION_ICON, CAPTION_ICON))
         button.setFixedSize(46, HEIGHT)
         button.setToolTip(tip)
-        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        button.setAccessibleName(tip)
+        button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         button.clicked.connect(slot)
         return button
 

@@ -104,6 +104,7 @@ class NavRail(QWidget):
         self.toggle.setObjectName("navToggle")
         self.toggle.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
         self.toggle.setAutoRaise(True)
+        self.toggle.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.toggle.clicked.connect(lambda: self.set_expanded(not self._expanded))
 
         self.list = QListWidget(self)
@@ -237,4 +238,6 @@ class NavRail(QWidget):
     def _update_toggle(self) -> None:
         name = "panel_left_contract" if self._expanded else "panel_left_expand"
         self.toggle.setIcon(icon(name, "text"))
-        self.toggle.setToolTip("Hide stage names" if self._expanded else "Show stage names")
+        label = "Hide stage names" if self._expanded else "Show stage names"
+        self.toggle.setToolTip(label)
+        self.toggle.setAccessibleName(label)
