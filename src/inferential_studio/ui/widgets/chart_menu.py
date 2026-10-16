@@ -5,9 +5,10 @@ small "A" auto-range button are switched off everywhere: view commands live on t
 example **Back** / **Fit all** on trends), and the raw settings could leave a chart in a state
 the page does not expect (log axes, frozen ranges).
 
-Every chart's view box is a :class:`ChartViewBox`. A right *click* (not a right-drag) opens the
-standard menu, which acts on the whole chart widget — all stacked trends, the full scatter
-matrix — exactly as shown on screen.
+Every chart's view box is a :class:`ChartViewBox`, whose mouse navigation is disabled (no pan,
+rubber-band zoom or wheel zoom), so a chart can never be left in a state the page does not
+expect. A right *click* (not a right-drag) opens the standard menu, which acts on the whole
+chart widget — all stacked trends, the full scatter matrix — exactly as shown on screen.
 """
 
 from __future__ import annotations
@@ -25,11 +26,17 @@ SAVE_TEXT = "Save image…"
 
 
 class ChartViewBox(pg.ViewBox):
-    """View box whose right-click opens the standard chart menu instead of PyQtGraph's."""
+    """View box for the static charts: right-click opens the standard chart menu, and mouse
+    navigation is off so a chart can never be dragged into a state the page cannot undo.
+
+    ``trend_view._TrendViewBox`` subclasses this and re-enables the axes it needs for its
+    deliberate drag-to-zoom / pan navigation.
+    """
 
     def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003 - pyqtgraph signature
         kwargs["enableMenu"] = False
         super().__init__(*args, **kwargs)
+        self.setMouseEnabled(False, False)  # no pan, no rubber-band zoom, no wheel zoom
         self.empty = False  # set by plots.ChartPlotItem while it shows its "no data" message
 
     def mouseClickEvent(self, ev) -> None:  # noqa: ANN001, N802 - pyqtgraph override
