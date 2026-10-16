@@ -23,12 +23,14 @@ from html import escape
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -50,6 +52,7 @@ HIGHLIGHT_COLOUR = (47, 143, 216)  # drag-to-zoom band (BLUE), as the cleaning p
 MIN_DRAG_PX = 6  # shorter drags are treated as clicks, not zooms
 PIN_COLOUR = BLUE  # vertical line marking the pinned point in time
 HEADER_HEIGHT = 16  # px of the per-chart name header
+MIN_PLOT_HEIGHT = 120  # scroll stacked plots rather than crushing their axes on small screens
 
 
 @dataclass
@@ -161,6 +164,12 @@ class TrendView(QWidget):
         self.canvas = pg.GraphicsLayoutWidget()
         self.canvas.setProperty("chartName", "trends")
         self.canvas.setBackground(TOKENS["chart_bg"])
+        self.chart_scroll = QScrollArea()
+        self.chart_scroll.setWidgetResizable(True)
+        self.chart_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.chart_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.chart_scroll.setWidget(self.canvas)
+        self.chart_scroll.viewport().installEventFilter(self)
         self.empty_label = QLabel("Select variables to plot.")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.limit_label = QLabel()
@@ -171,10 +180,11 @@ class TrendView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(bar)
-        layout.addWidget(self.canvas, 1)
+        layout.addWidget(self.chart_scroll, 1)
         layout.addWidget(self.empty_label, 1)
         layout.addWidget(self.limit_label, 1)
         self.canvas.setVisible(False)
+        self.chart_scroll.setVisible(False)
 
         self._mouse_proxy = pg.SignalProxy(
             self.canvas.scene().sigMouseMoved, rateLimit=30, slot=self._on_mouse
@@ -306,6 +316,7 @@ class TrendView(QWidget):
         self._synced_mode = self.mode.currentData()
         has_data = bool(self._series)
         self.canvas.setVisible(has_data)
+        self.chart_scroll.setVisible(has_data)
         self.empty_label.setVisible(not has_data)
         self.limit_label.setVisible(False)
         if not has_data:
@@ -333,6 +344,7 @@ class TrendView(QWidget):
         """Add/remove only the plots that changed; update each plot's curves in place."""
         has_data = bool(self._series)
         self.canvas.setVisible(has_data)
+        self.chart_scroll.setVisible(has_data)
         self.empty_label.setVisible(not has_data)
         self.limit_label.setVisible(False)
         if not has_data:
@@ -381,8 +393,9 @@ class TrendView(QWidget):
         self._finish_sync()
 
     def _finish_sync(self) -> None:
-        for i, plot in enumerate(self.plots):
-            plot.getAxis("bottom").setStyle(showValues=(i == len(self.plots) - 1))
+        self.canvas.setMinimumHeight(max(1, len(self.plots)) * MIN_PLOT_HEIGHT)
+        self._update_axes()
+        for plot in self.plots:
             plot.setXLink(self.plots[0] if plot is not self.plots[0] else None)
         if self.plots and self._xrange_plot is not self.plots[0]:
             if self._xrange_conn is not None and self._xrange_plot is not None:
@@ -393,6 +406,16 @@ class TrendView(QWidget):
             )
             self._xrange_plot = self.plots[0]
         self.rebuilt.emit()
+
+    def _update_axes(self) -> None:
+        scrolling = self.canvas.minimumHeight() > self.chart_scroll.viewport().height()
+        for i, plot in enumerate(self.plots):
+            plot.getAxis("bottom").setStyle(showValues=scrolling or i == len(self.plots) - 1)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: ANN001, N802 - Qt override
+        if watched is self.chart_scroll.viewport() and event.type() == QEvent.Type.Resize:
+            self._update_axes()
+        return super().eventFilter(watched, event)
 
     def _clear_plots(self) -> None:
         self._zoom_history.clear()

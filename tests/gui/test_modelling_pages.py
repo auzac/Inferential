@@ -46,6 +46,35 @@ def train(w, qtbot):
     qtbot.waitUntil(lambda: w.session.training is not None and idle(w), timeout=60000)
 
 
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_compact_validation_keeps_diagnostics_and_controls_reachable(loaded, qtbot, theme):
+    from PySide6.QtCore import QPoint
+
+    train(loaded, qtbot)
+    loaded.set_theme(theme)
+    loaded.resize(960, 640)
+    loaded.sidebar.setCurrentRow(7)
+    page = loaded.pages["validation"]
+    page.tabs.setCurrentWidget(page.what_if)
+    qtbot.wait(200)
+    assert not page.comparison_toggle.isChecked()
+    assert not page.comparison_panel.isVisible() and not page.metrics.isVisible()
+    assert page.tabs.height() >= 260
+    assert not page.what_if.inputs_chart.isVisibleTo(page.what_if)
+    assert page.what_if.output_chart.height() >= 150
+    assert page.what_if.length.isVisibleTo(page)
+    viewport = page.what_if._list.parentWidget()
+    list_top = viewport.mapTo(page.what_if.summary.parentWidget(), QPoint()).y()
+    assert page.what_if.summary.geometry().bottom() < list_top
+    page.comparison_toggle.click()
+    qtbot.wait(20)
+    assert page.metrics.isVisible() and page.comparison_panel.isVisible()
+    assert page.content_scroll.verticalScrollBar().maximum() > 0
+    loaded.resize(1440, 900)
+    qtbot.wait(20)
+    assert page.comparison_toggle.isChecked()
+
+
 def test_setup_form_edits_config_with_undo(loaded, qtbot):
     page = loaded.pages["model_setup"]
     page.scaling.setCurrentIndex(page.scaling.findData(Scaling.ROBUST.value))
