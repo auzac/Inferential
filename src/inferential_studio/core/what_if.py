@@ -24,6 +24,7 @@ import pandas as pd
 from inferential_studio.core.features import TargetSamples, build_feature_matrix, data_span_s
 from inferential_studio.core.models import ModelResult, TrainingRun
 from inferential_studio.core.schemas import Aggregation, FeatureSpec, FilterKind
+from inferential_studio.core.tasks import CancelToken, check
 
 EPOCH = pd.Timestamp("2000-01-01", tz="UTC")  # arbitrary origin; results are in seconds from it
 SETTLED = 0.95  # "settled" = 95 % of the final change
@@ -141,17 +142,19 @@ def simulate(
     )  # fmt: skip
 
 
-def respond(model: StepModel, schedule: Schedule, t_s: np.ndarray, dt_s: float) -> np.ndarray:
+def respond(model: StepModel, schedule: Schedule, t_s: np.ndarray, dt_s: float,
+            *, cancel: CancelToken | None = None) -> np.ndarray:
     """Prediction at times ``t_s`` (multiples of ``dt_s``) while the inputs follow ``schedule``:
     each entry holds from its time until the next; before the first, inputs sit at baseline."""
-    return _run(model, schedule, np.asarray(t_s, dtype=float), dt_s)[0]
+    return _run(model, schedule, np.asarray(t_s, dtype=float), dt_s, cancel=cancel)[0]
 
 
-def steady_state(model: StepModel, changes: dict[str, float] | list, dt_s: float) -> float:
+def steady_state(model: StepModel, changes: dict[str, float] | list, dt_s: float,
+                 *, cancel: CancelToken | None = None) -> float:
     """Where the prediction settles with ``changes`` held. Simulated, not ``b₀ + Σ bⱼ·xⱼ``: a
     standard-deviation feature is 0 at steady state, not its training mean."""
     t = _round_up(_warmup_s(model) + model.response_span_s() + dt_s, dt_s)
-    return float(respond(model, [(0.0, dict(changes))], np.array([t]), dt_s)[0])
+    return float(respond(model, [(0.0, dict(changes))], np.array([t]), dt_s, cancel=cancel)[0])
 
 
 def input_values(model: StepModel, schedule: Schedule, t: np.ndarray) -> dict[str, np.ndarray]:
@@ -199,20 +202,23 @@ def _round_up(value: float, step: float) -> float:
     return float(np.ceil(value / step) * step)
 
 
-def _run(model: StepModel, schedule: Schedule, t_pred: np.ndarray, dt: float):  # noqa: ANN202
+def _run(model: StepModel, schedule: Schedule, t_pred: np.ndarray, dt: float,
+         *, cancel: CancelToken | None = None):  # noqa: ANN202
     """Inputs on a ``dt`` grid from a steady-state lead-in (windows and filters start settled)
     to the last time a feature reads (centred windows read ahead; inputs hold), through the
     model's own feature pipeline."""
+    check(cancel)
     lead = max([0.0] + [data_span_s(i.spec)[1] for i in model.inputs if i.spec])
     t0 = t_pred[0] - _round_up(_warmup_s(model) + dt, dt)
     t_raw = np.arange(t0, t_pred[-1] + _round_up(lead, dt) + dt / 2, dt)
     process = pd.DataFrame(input_values(model, schedule, t_raw),
                            index=EPOCH + pd.to_timedelta(t_raw, unit="s"))  # fmt: skip
+    check(cancel)
     n = t_pred.size
     times = pd.DatetimeIndex(EPOCH + pd.to_timedelta(t_pred, unit="s"))
     dummy = TargetSamples("__y__", times, np.zeros(n), np.zeros(n, bool), np.zeros(n, bool))
     fm = build_feature_matrix(
-        dummy, process, [i.spec or _default_spec(i.name) for i in model.inputs]
+        dummy, process, [i.spec or _default_spec(i.name) for i in model.inputs], cancel=cancel
     )
     names = [i.name for i in model.inputs]
     X = fm.X[names].to_numpy(dtype=float)

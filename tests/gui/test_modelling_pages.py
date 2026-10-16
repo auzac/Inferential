@@ -167,6 +167,10 @@ def test_what_if_live_trend_responds_like_the_soft_sensor(loaded, qtbot):
     train(loaded, qtbot)
     vpage = loaded.pages["validation"]
     view = vpage.what_if
+    loaded.sidebar.setCurrentRow(7)
+    vpage.tabs.setCurrentWidget(view)
+    view.pause_button.setChecked(True)
+    qtbot.waitUntil(lambda: not view._initializing and view._pending is None, timeout=30000)
     assert vpage.tabs.indexOf(view) >= 0
     assert view._model is not None and view.steps() == {}
     assert "steady state" in view.summary.text()
@@ -174,6 +178,7 @@ def test_what_if_live_trend_responds_like_the_soft_sensor(loaded, qtbot):
     assert np.allclose(view._y, baseline)  # starts settled
     top = view._controls[0]  # largest possible effect first
     top.slider.setValue(750)  # +50 % of the training range: changes now
+    qtbot.waitUntil(lambda: view._pending is None)
     step = top.step()
     assert step == pytest.approx(0.5 * top.inp.span) and "Δŷ" in top.effect.text()
     expected = top.inp.coefficient * step
@@ -181,20 +186,63 @@ def test_what_if_live_trend_responds_like_the_soft_sensor(loaded, qtbot):
     assert "settling at" in view.summary.text()
     stepped_at = view._schedule[-1][0]
     # The clock runs: nothing moves before the change, then it settles at coefficient × step.
-    while view._t[-1] < stepped_at + view._view:
-        view._tick()
+    view._tick()
+    qtbot.waitUntil(lambda: view._pending is None)
+    view._clock = stepped_at + view._view
+    view._request_response()
+    qtbot.waitUntil(lambda: view._pending is None)
     before = view._t < stepped_at
     assert np.allclose(view._y[before], baseline)
     assert view._y[-1] - baseline == pytest.approx(expected, rel=1e-9)
     assert view._t[-1] - view._t[0] <= view._view + view._dt  # the trend scrolls
     # Another model of the same run keeps the changes and starts settled at them.
     vpage.model_combo.setCurrentIndex(1)
+    qtbot.waitUntil(lambda: not view._initializing and view._pending is None)
     same = next(c for c in view._controls if c.inp.name == top.inp.name)
     assert same.step() == pytest.approx(step)
     assert view._y[-1] == pytest.approx(view._target, rel=1e-9)
     view.reset()
+    qtbot.waitUntil(lambda: not view._initializing and view._pending is None)
     assert view.steps() == {} and np.allclose(view._y, view._baseline)
     from inferential_studio.ui.widgets.what_if import COMPACT_HEIGHT
 
     # Short screens: the inputs chart gives way to the prediction.
     assert view.inputs_chart.isVisibleTo(view) == (view.height() >= COMPACT_HEIGHT)
+
+
+@pytest.mark.parametrize("subsets,validation", [(False, True), (False, False), (True, True), (True, False)])
+def test_ranking_metric_stays_visible_at_both_window_sizes(loaded, qtbot, subsets, validation):
+    from PySide6.QtCore import Qt
+
+    from inferential_studio.core.schemas import ModelSpec
+
+    cfg = loaded.session.project.modelling
+    edit_lists(loaded.undo_stack, loaded.session, "Ranking comparison",
+               modelling=replace(cfg, search_subsets=subsets,
+                                 models=(ModelSpec(ModelKind.MLR),),
+                                 split=replace(cfg.split, validation_fraction=.2 if validation else 0)))
+    train(loaded, qtbot)
+    page = loaded.pages["validation"]
+    loaded.session.training.models[0].name += " · " + "Long_process_tag_" * 30
+    page.refresh()
+    loaded.sidebar.setCurrentRow(7)
+    ranking = "cv_rmse" if subsets or not validation else "validation_rmse"
+    assert list(page.comparison.model_.frame.columns)[:2] == [ranking, "input_count"]
+    assert "ranking" in page.comparison.model().headerData(0, Qt.Orientation.Horizontal)
+    for width, height in [(960, 640), (1440, 900)]:
+        loaded.resize(width, height)
+        page.comparison_toggle.setChecked(True)
+        page.candidate_tabs.setCurrentWidget(page.comparison)
+        qtbot.wait(50)
+        table = page.comparison
+        assert table.horizontalScrollBar().value() == 0
+        assert table.columnViewportPosition(0) >= 0
+        assert table.verticalHeader().width() <= 260
+        assert table.model().headerData(0, Qt.Orientation.Vertical, Qt.ItemDataRole.ToolTipRole)
+        assert table.columnViewportPosition(0) + table.columnWidth(0) <= table.viewport().width()
+        if subsets:
+            page.candidate_tabs.setCurrentWidget(page.recommended)
+            qtbot.wait(20)
+            assert list(page.recommended.model_.frame.columns)[:2] == ["model", "cv_rmse"]
+            table = page.recommended
+            assert table.columnViewportPosition(1) + table.columnWidth(1) <= table.viewport().width()

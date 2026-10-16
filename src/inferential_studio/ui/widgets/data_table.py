@@ -184,7 +184,7 @@ class DataFrameModel(QAbstractTableModel):
                 )
                 return int(side | Qt.AlignmentFlag.AlignVCenter)
             return None
-        if role != Qt.ItemDataRole.DisplayRole:
+        if role not in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole):
             return None
         if orientation == Qt.Orientation.Horizontal:
             name = str(self._frame.columns[section])
