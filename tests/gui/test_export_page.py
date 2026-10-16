@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import shutil
+import threading
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
 
 from inferential_studio.core.artifacts import load_artifact
@@ -74,13 +76,17 @@ def test_dataset_to_report_workflow(trained, qtbot, tmp_path):
     html = report.read_text(encoding="utf-8")
     assert "Top purity soft sensor" in html and "has not been evaluated" in html
     preds = page.export_predictions(tmp_path / "pred.xlsx")
+    qtbot.waitUntil(lambda: not page._exporting, timeout=30000)
     table = pd.read_excel(preds, sheet_name="Predictions")
     assert TEST not in set(table["period"])
     w.session.reveal_test()
     assert page.include_test.isChecked()
     page.export_predictions(tmp_path / "pred.csv")
+    qtbot.waitUntil(lambda: not page._exporting, timeout=30000)
     assert TEST in set(pd.read_csv(tmp_path / "pred.csv", encoding="utf-8-sig")["period"])
-    assert page.export_features(tmp_path / "features.xlsx").is_file()
+    features = page.export_features(tmp_path / "features.xlsx")
+    qtbot.waitUntil(lambda: not page._exporting, timeout=30000)
+    assert features.is_file()
     model_file = page.save_model(tmp_path / "model.imsmodel")
     art = load_artifact(model_file)
     assert art.name == page.model_combo.currentText() and TEST in art.data["metrics"]
@@ -98,7 +104,9 @@ def test_dataset_to_report_workflow(trained, qtbot, tmp_path):
     )
     np.testing.assert_allclose(merged.to_numpy(), m.predictions["predicted"].to_numpy(), rtol=1e-9)
     assert "Against the lab" in page.apply_note.text()
-    assert page.export_applied(tmp_path / "batch.csv").is_file()
+    batch = page.export_applied(tmp_path / "batch.csv")
+    qtbot.waitUntil(lambda: not page._exporting, timeout=30000)
+    assert batch.is_file()
     assert w.errors == []
 
 
@@ -114,6 +122,43 @@ def test_saved_results_are_reproduced_on_reopen(trained, qtbot, tmp_path):
     assert w.session.test_revealed  # having looked at the test is remembered
     shown = w.session.messages.conditions("validation")
     assert any(m.text == w.session.reproduction for m in shown)
+
+
+def test_export_preparation_is_background_and_cancellation_preserves_file(
+    trained, qtbot, tmp_path, monkeypatch
+):
+    from inferential_studio.ui.pages import export_page
+
+    page = trained.pages["export"]
+    path = tmp_path / "features.xlsx"
+    path.write_bytes(b"previous export")
+    entered, release = threading.Event(), threading.Event()
+    threads = []
+    original = export_page.feature_matrix_table
+
+    def held(*args):
+        threads.append(threading.get_ident())
+        entered.set()
+        assert release.wait(5)
+        return original(*args)
+
+    monkeypatch.setattr(export_page, "feature_matrix_table", held)
+    heartbeat = []
+    try:
+        assert page.export_features(path) == path
+        qtbot.waitUntil(entered.is_set)
+        assert page.last_written is None and not page.btn_features.isEnabled()
+        QTimer.singleShot(0, lambda: heartbeat.append(True))
+        qtbot.waitUntil(lambda: bool(heartbeat))
+        assert threads[0] != threading.get_ident()
+        assert page.export_features(path) is None  # no competing write to the same destination
+        trained.tasks.cancel_all()
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not page._exporting)
+    assert path.read_bytes() == b"previous export"
+    assert page.last_written is None and page.btn_features.isEnabled()
+    assert trained.errors == []
 
 
 def test_portable_copy_opens_without_the_original_files(trained, qtbot, tmp_path):

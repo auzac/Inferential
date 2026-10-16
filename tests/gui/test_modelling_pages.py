@@ -47,6 +47,36 @@ def train(w, qtbot):
     qtbot.waitUntil(lambda: w.session.training is not None and idle(w), timeout=60000)
 
 
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_compact_validation_keeps_diagnostics_and_controls_reachable(loaded, qtbot, theme):
+    from PySide6.QtCore import QPoint
+
+    train(loaded, qtbot)
+    loaded.set_theme(theme)
+    loaded.resize(960, 640)
+    loaded.sidebar.setCurrentRow(7)
+    page = loaded.pages["validation"]
+    page.tabs.setCurrentWidget(page.what_if)
+    qtbot.wait(200)
+    assert not page.comparison_toggle.isChecked()
+    assert not page.comparison_panel.isVisible() and not page.metrics.isVisible()
+    assert page.tabs.height() >= 260
+    assert not page.what_if.inputs_chart.isVisibleTo(page.what_if)
+    assert page.what_if.output_chart.height() >= 150
+    assert page.what_if.pause_button.isVisibleTo(page)
+    assert page.what_if.reset_button.isVisibleTo(page)
+    viewport = page.what_if._list.parentWidget()
+    list_top = viewport.mapTo(page.what_if.summary.parentWidget(), QPoint()).y()
+    assert page.what_if.summary.geometry().bottom() < list_top
+    page.comparison_toggle.click()
+    qtbot.wait(20)
+    assert page.metrics.isVisible() and page.comparison_panel.isVisible()
+    assert page.content_scroll.verticalScrollBar().maximum() > 0
+    loaded.resize(1440, 900)
+    qtbot.wait(20)
+    assert page.comparison_toggle.isChecked()
+
+
 def test_setup_form_edits_config_with_undo(loaded, qtbot):
     page = loaded.pages["model_setup"]
     page.scaling.setCurrentIndex(page.scaling.findData(Scaling.ROBUST.value))
@@ -194,8 +224,6 @@ def test_progress_bar_shows_where_the_workflow_stands(loaded, qtbot, tmp_path):
     run_wide = [p.message for p in loaded.session.training.problems if p.severity != "error"]
     model_msg = loaded.session.messages.condition("training.model")
     assert run_wide and not (model_msg and any(w in model_msg.text for w in run_wide))
-    table = loaded.pages["validation"].comparison  # fitted table: tabs size to it, no empty band
-    assert table.sizeHint().height() == table.maximumHeight()
     loaded.sidebar.setCurrentRow(8)
     assert states()["export"] == TODO  # visiting Export is not exporting
     loaded.pages["export"]._done(tmp_path / "card.html")
