@@ -190,6 +190,12 @@ def test_progress_bar_shows_where_the_workflow_stands(loaded, qtbot, tmp_path):
         assert states()["validation"] == ATTENTION
     train(loaded, qtbot)
     assert states()["training"] == states()["validation"] == DONE
+    # Run-wide warnings (autocorrelation) are reported once, not again for the selected model.
+    run_wide = [p.message for p in loaded.session.training.problems if p.severity != "error"]
+    model_msg = loaded.session.messages.condition("training.model")
+    assert run_wide and not (model_msg and any(w in model_msg.text for w in run_wide))
+    table = loaded.pages["validation"].comparison  # fitted table: tabs size to it, no empty band
+    assert table.sizeHint().height() == table.maximumHeight()
     loaded.sidebar.setCurrentRow(8)
     assert states()["export"] == TODO  # visiting Export is not exporting
     loaded.pages["export"]._done(tmp_path / "card.html")

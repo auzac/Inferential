@@ -6,6 +6,11 @@ production release is `v1.0.0`.
 ## Unreleased
 
 ### Changed
+- Validation: the model comparison no longer leaves an empty band under its rows; the charts
+  below get the space. (Fitted summary tables now report their fitted height to containers such
+  as tab widgets.)
+- Training & Interpretation: run-wide warnings such as lab-sample autocorrelation are reported
+  once, not repeated for the selected model.
 - Tables fill the window. When the view is wider than the table, the columns grow in proportion
   to their content instead of leaving an empty band beside the last column; when it is narrower,
   the table keeps its own widths and scrolls rather than squeezing the text. Column widths you

@@ -11,6 +11,7 @@ from PySide6.QtCore import (
     QEvent,
     QModelIndex,
     QObject,
+    QSize,
     QSortFilterProxyModel,
     Qt,
 )
@@ -266,6 +267,12 @@ class DataTableView(QTableView):
             height += self.horizontalScrollBar().sizeHint().height()
         if height != self.height() or self.minimumHeight() != height:
             self.setFixedHeight(height)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt override
+        hint = super().sizeHint()
+        if self._fit_rows is not None:  # containers (tab widgets) size to the fitted height
+            hint.setHeight(self.maximumHeight())
+        return hint
 
     def resizeEvent(self, event) -> None:  # noqa: ANN001, N802 - Qt override
         super().resizeEvent(event)
