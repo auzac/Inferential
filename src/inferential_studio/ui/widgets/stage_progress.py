@@ -32,6 +32,7 @@ class StageProgress(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedSize(self.sizeHint())
+        self.setAccessibleName("Workflow progress")
 
     def sizeHint(self) -> QSize:  # noqa: N802 - Qt override
         return QSize(len(STAGES) * (SEGMENT + GAP) - GAP, HEIGHT)
@@ -39,6 +40,10 @@ class StageProgress(QWidget):
     def set_states(self, states: list[tuple[str, str]]) -> None:
         if states != self._states:
             self._states = states
+            labels = [
+                f"{s.number}. {s.title}: {st}" for s, (st, _n) in zip(STAGES, states, strict=True)
+            ]
+            self.setAccessibleDescription("; ".join(labels))
             self.update()
 
     def done_count(self) -> int:
