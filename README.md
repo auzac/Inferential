@@ -5,7 +5,7 @@ inferential models (soft sensors), starting with distillation columns.
 
 Python · PySide6 (Qt 6) · PyQtGraph · pandas · scikit-learn. No cloud services, no telemetry.
 
-> **Status: v0.5.5 — Milestone 5 + new window shell (release candidate for v1.0.0).** All nine stages work:
+> **Status: v0.5.7 — Milestone 5 + new window shell (release candidate for v1.0.0).** All nine stages work:
 > import, raw EDA, cleaning with reviewable flags, variable selection, per-predictor alignment to
 > lab samples, MLR / PLS / PCR / Ridge with chronological splits and time-aware CV, validation,
 > and export (HTML model card, predictions, JSON model file, batch prediction). Projects can be
@@ -75,11 +75,13 @@ src/inferential_studio/
     exclusions.py         unified exclusion masks with per-reason categories
     features.py           alignment to lab samples: resample, filter, windows, coverage, lag scan
     diagnostics.py        raw-vs-cleaned statistics, aligned correlations, VIF
+    what_if.py            what-if step test run through the model's own features
     splits.py             chronological train/validation/test split, purge gap, time-aware CV
     models.py             MLR/PLS/PCR/Ridge pipelines, tuning, interpretation, metrics
     artifacts.py          JSON model files (.imsmodel), batch prediction, saved-results checks
     exports.py            predictions / feature matrix / batch results to CSV or Excel
     report.py, svg.py     self-contained HTML model card with inline SVG charts
+    colours.py            data series colours shared by the on-screen charts and model-card SVG
     synthetic.py          synthetic distillation dataset with ground truth
     tasks.py              progress/cancellation primitives for long-running functions
   infrastructure/         logging, per-user settings, paths, background TaskManager (Qt)
