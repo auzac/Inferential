@@ -59,7 +59,7 @@ THEMES: dict[str, dict[str, str]] = {
         "hover": "#e5e2d8",  # subtle fill on the base layer
         "menu_hover": "#e5e2d8",  # menu row highlight (menus sit on ``surface``)
         "selected": "#e0dccf",
-        "accent": "#c15f3c",
+        "accent": "#b85a38",
         "accent_hover": "#ad5434",
         "accent_pressed": "#96482c",
         "accent_soft": "#f4e2d9",  # selection background
@@ -149,24 +149,26 @@ QWidget#titleBar {{ background: {t["base"]}; }}
 QLabel#windowTitle {{ color: {t["text"]}; }}
 QLabel#windowTitleApp {{ color: {t["text_muted"]}; }}
 QFrame#titleSeparator {{ background: {t["border_strong"]}; margin: 10px 4px; }}
-QToolButton#titleButton {{ background: transparent; border: none; border-radius: 4px; padding: 4px;
+QToolButton#titleButton {{ background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 3px;
                            min-width: 30px; min-height: 30px; }}
 QToolButton#titleButton:hover {{ background: {t["hover"]}; }}
 QToolButton#titleButton:pressed {{ background: {t["selected"]}; }}
 QToolButton#titleButton:checked {{ background: {t["selected"]}; }}
 QToolButton#titleButton::menu-indicator {{ image: none; width: 0; }}
-QToolButton#captionButton {{ background: transparent; border: none; border-radius: 0; padding: 0;
+QToolButton#captionButton {{ background: transparent; border: 1px solid transparent; border-radius: 0; padding: 0;
                              min-width: 46px; max-width: 46px; }}
 QToolButton#captionButton:hover {{ background: {t["hover"]}; }}
 QToolButton#captionButton:pressed {{ background: {t["selected"]}; }}
-QToolButton#closeButton {{ background: transparent; border: none; border-radius: 0; padding: 0;
+QToolButton#closeButton {{ background: transparent; border: 1px solid transparent; border-radius: 0; padding: 0;
                            min-width: 46px; max-width: 46px; }}
 QToolButton#closeButton:hover {{ background: {t["close_hover"]}; }}
 QToolButton#closeButton:pressed {{ background: #b22a1c; }}
 QWidget#navRail {{ background: {t["base"]}; }}
 QListWidget#sidebar {{ background: transparent; border: none; outline: none; color: {t["text"]}; }}
-QToolButton#navToggle {{ background: transparent; border: none; border-radius: 4px; padding: 0;
+QToolButton#navToggle {{ background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 0;
                          margin: 0 4px; min-height: 36px; }}
+QToolButton#titleButton:focus, QToolButton#captionButton:focus,
+QToolButton#closeButton:focus, QToolButton#navToggle:focus {{ border-color: {t["accent"]}; }}
 QToolButton#navToggle:hover {{ background: {t["hover"]}; }}
 QFrame#contentLayer {{ background: {t["bg"]}; border: 1px solid {t["border"]}; border-right: none;
                        border-bottom: none; border-top-left-radius: 8px; }}
@@ -241,6 +243,7 @@ QPushButton[primary="true"] {{ background: {t["accent"]}; color: {t["on_accent"]
                                font-weight: 600; padding: 5px 16px; }}
 QPushButton[primary="true"]:hover {{ background: {t["accent_hover"]}; border-color: {t["accent_hover"]}; }}
 QPushButton[primary="true"]:pressed {{ background: {t["accent_pressed"]}; }}
+QPushButton[primary="true"]:focus {{ border: 2px solid {t["text"]}; padding: 4px 15px; }}
 QPushButton[primary="true"]:disabled {{ background: {t["accent_disabled"]}; border-color: {t["accent_disabled"]};
                                         color: {t["bg"]}; }}
 QToolButton {{ border-radius: 4px; padding: 3px 8px; color: {t["text"]}; }}
